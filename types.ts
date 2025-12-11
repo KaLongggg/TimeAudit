@@ -1,3 +1,4 @@
+
 export enum Role {
   ADMIN = 'ADMIN',
   EMPLOYEE = 'EMPLOYEE'
@@ -6,6 +7,12 @@ export enum Role {
 export enum TimesheetStatus {
   DRAFT = 'DRAFT',
   SUBMITTED = 'SUBMITTED',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED'
+}
+
+export enum TimeOffStatus {
+  PENDING = 'PENDING',
   APPROVED = 'APPROVED',
   REJECTED = 'REJECTED'
 }
@@ -44,6 +51,7 @@ export interface TimeEntry {
   dailyTimes: DayTime[]; // Array of 7 {start, end} objects
   notes: string; 
   billingStatus: 'Billable' | 'Non Billable';
+  starred?: boolean;
 }
 
 export interface Timesheet {
@@ -53,4 +61,16 @@ export interface Timesheet {
   status: TimesheetStatus;
   entries: TimeEntry[];
   totalHours: number;
+}
+
+export interface TimeOffRequest {
+  id: string;
+  userId: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
+  startTime?: string; // HH:MM
+  endTime?: string;   // HH:MM
+  type: 'Annual Leave' | 'Sick Leave' | 'Other';
+  reason: string;
+  status: TimeOffStatus;
 }

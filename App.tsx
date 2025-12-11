@@ -1,9 +1,7 @@
+
 import React, { useState, useEffect } from 'react';
 import { 
-  MOCK_USERS, 
-  MOCK_PROJECTS, 
-  MOCK_TASKS, 
-  MOCK_TIMESHEETS 
+  MOCK_USERS // Keep for fallback if needed
 } from './constants';
 import { 
   User, 
@@ -12,12 +10,16 @@ import {
   Task, 
   Timesheet, 
   TimesheetStatus,
-  TimeEntry
+  TimeEntry,
+  TimeOffRequest
 } from './types';
 import { TimesheetEditor } from './components/TimesheetEditor';
 import { AdminView } from './components/AdminView';
 import { ProjectManager } from './components/ProjectManager';
+import { TimeOffView } from './components/TimeOffView';
 import { storageService } from './services/storage';
+import { Login } from './components/Login';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { 
   Clock, 
   LayoutDashboard, 
@@ -27,7 +29,8 @@ import {
   Briefcase,
   Wifi,
   WifiOff,
-  Loader2
+  Loader2,
+  Plane
 } from 'lucide-react';
 
 // Helper to manipulate YYYY-MM-DD strings safely using UTC to avoid timezone issues
@@ -40,24 +43,43 @@ const addDays = (dateStr: string, days: number): string => {
   return date.toISOString().split('T')[0];
 };
 
-const App: React.FC = () => {
+// Helper to get the current week's Monday based on Local System Time
+const getSystemCurrentWeekStart = (): string => {
+  const now = new Date();
+  const day = now.getDay(); // 0 is Sunday
+  // Calculate difference to get to Monday
+  const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(now.setDate(diff));
+  
+  const y = monday.getFullYear();
+  const m = String(monday.getMonth() + 1).padStart(2, '0');
+  const d = String(monday.getDate()).padStart(2, '0');
+  
+  return `${y}-${m}-${d}`;
+};
+
+// --- MAIN CONTENT COMPONENT (To separate Auth Logic) ---
+const DashboardContent: React.FC = () => {
+  const { user, signOut } = useAuth();
+  
   // Global State
   const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState<User>(MOCK_USERS[0]);
   
   // Data State
   const [timesheets, setTimesheets] = useState<Timesheet[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]); // For Admin View
+  const [timeOffRequests, setTimeOffRequests] = useState<TimeOffRequest[]>([]);
   
   // Navigation & View State
-  const [currentView, setCurrentView] = useState<'timesheet' | 'admin' | 'projects'>('timesheet');
+  const [currentView, setCurrentView] = useState<'timesheet' | 'admin' | 'projects' | 'timeoff'>('timesheet');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
-  // Date State for Timesheet View
-  const [currentWeekStart, setCurrentWeekStart] = useState('2023-10-23'); // Default start date for demo
+  // Date State for Timesheet View - Initialize with System Time
+  const [currentWeekStart, setCurrentWeekStart] = useState(getSystemCurrentWeekStart());
 
-  // --- INITIAL DATA LOAD ---
+  // Load Data
   useEffect(() => {
     const initData = async () => {
       setLoading(true);
@@ -65,21 +87,23 @@ const App: React.FC = () => {
       setProjects(data.projects);
       setTasks(data.tasks);
       setTimesheets(data.timesheets);
+      setAllUsers(data.users);
+      setTimeOffRequests(data.timeOffRequests || []);
       setLoading(false);
     };
     initData();
   }, []);
 
-  // Helper to ensure employee has a draft timesheet for current week
+  // Ensure current user has a timesheet draft
   useEffect(() => {
-    if (!loading && currentUser.role === Role.EMPLOYEE) {
+    if (!loading && user) {
         // Find existing or create new for the selected week
-        const existing = timesheets.find(t => t.userId === currentUser.id && t.weekStartDate === currentWeekStart);
+        const existing = timesheets.find(t => t.userId === user.id && t.weekStartDate === currentWeekStart);
         
         if (!existing) {
             const newSheet: Timesheet = {
                 id: `ts-${Date.now()}`,
-                userId: currentUser.id,
+                userId: user.id,
                 weekStartDate: currentWeekStart,
                 status: TimesheetStatus.DRAFT,
                 entries: [],
@@ -91,12 +115,10 @@ const App: React.FC = () => {
             storageService.saveTimesheet(newSheet);
         }
     }
-  }, [currentUser, timesheets, currentWeekStart, loading]);
+  }, [user, timesheets, currentWeekStart, loading]);
 
   const handleSaveTimesheet = (updated: Timesheet) => {
-    // Optimistic Update
     setTimesheets(prev => prev.map(t => t.id === updated.id ? updated : t));
-    // Persist
     storageService.saveTimesheet(updated);
   };
 
@@ -125,7 +147,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Week Navigation Logic
   const handleWeekChange = (direction: 'prev' | 'next' | 'current', date?: string) => {
     if (direction === 'current' && date) {
       const [y, m, d] = date.split('-').map(Number);
@@ -141,54 +162,55 @@ const App: React.FC = () => {
     }
   };
 
-  // Copy Previous Logic
   const handleCopyPrevious = () => {
-    const prevDateStr = addDays(currentWeekStart, -7);
+    if (!user) return;
+    try {
+      const previousSheets = timesheets
+        .filter(t => t.userId === user.id && t.weekStartDate < currentWeekStart)
+        .sort((a, b) => b.weekStartDate.localeCompare(a.weekStartDate));
 
-    // Try finding exact previous week
-    let prevTimesheet = timesheets.find(t => t.userId === currentUser.id && t.weekStartDate === prevDateStr);
+      if (previousSheets.length === 0) {
+        alert("No previous timesheets found to copy from.");
+        return;
+      }
 
-    // Fallback: If no previous week, find the most recent one
-    if (!prevTimesheet) {
-      const userSheets = timesheets
-        .filter(t => t.userId === currentUser.id && t.weekStartDate < currentWeekStart)
-        .sort((a, b) => b.weekStartDate.localeCompare(a.weekStartDate)); // Descending order
+      const sourceSheet = previousSheets[0];
+      if (!sourceSheet.entries || sourceSheet.entries.length === 0) {
+           alert("Previous timesheet found but it is empty.");
+           return;
+      }
+
+      const currentSheet = timesheets.find(t => t.userId === user.id && t.weekStartDate === currentWeekStart);
+      if (!currentSheet) {
+         alert("Target timesheet not found. Please refresh.");
+         return;
+      }
+
+      const clonedEntries = JSON.parse(JSON.stringify(sourceSheet.entries)) as TimeEntry[];
+      const newEntries = clonedEntries.map(e => ({
+        ...e,
+        id: Math.random().toString(36).substr(2, 9),
+      }));
       
-      if (userSheets.length > 0) {
-        prevTimesheet = userSheets[0];
-      }
-    }
+      const updatedSheet = {
+        ...currentSheet,
+        entries: [...(currentSheet.entries || []), ...newEntries],
+        totalHours: (currentSheet.totalHours || 0) + (sourceSheet.totalHours || 0)
+      };
+      
+      setTimesheets(prev => prev.map(t => t.id === updatedSheet.id ? updatedSheet : t));
+      storageService.saveTimesheet(updatedSheet);
+      alert(`Successfully copied entries from week of ${sourceSheet.weekStartDate}.`); 
 
-    if (prevTimesheet && prevTimesheet.entries.length > 0) {
-      if(confirm(`Copy entries from week of ${prevTimesheet.weekStartDate}?`)) {
-        const currentSheet = timesheets.find(t => t.userId === currentUser.id && t.weekStartDate === currentWeekStart);
-        if (currentSheet) {
-          const newEntries = prevTimesheet.entries.map(e => ({
-            ...e,
-            id: Math.random().toString(36).substr(2, 9),
-          }));
-          
-          const updatedSheet = {
-             ...currentSheet,
-             entries: [...currentSheet.entries, ...newEntries],
-             totalHours: currentSheet.totalHours + prevTimesheet.totalHours
-          };
-          
-          setTimesheets(prev => prev.map(t => t.id === updatedSheet.id ? updatedSheet : t));
-          storageService.saveTimesheet(updatedSheet);
-        }
-      }
-    } else {
-      alert(`No previous timesheet entries found to copy.`);
+    } catch (error) {
+      console.error("Copy failed", error);
+      alert("Error copying timesheet.");
     }
   };
 
-  // Project CRUD Handlers
+  // CRUD Handlers
   const handleAddProject = (projectData: Omit<Project, 'id'>) => {
-    const newProject: Project = {
-      ...projectData,
-      id: `p-${Date.now()}`
-    };
+    const newProject: Project = { ...projectData, id: `p-${Date.now()}` };
     setProjects(prev => [...prev, newProject]);
     storageService.saveProject(newProject);
   };
@@ -199,25 +221,17 @@ const App: React.FC = () => {
   };
 
   const handleDeleteProject = (id: string) => {
-    if (confirm('Are you sure you want to delete this project?')) {
+    if (confirm('Delete project?')) {
       setProjects(prev => prev.filter(p => p.id !== id));
-      setTasks(prev => prev.filter(t => t.projectId !== id)); // Cascade delete local state
-      
-      // Persist deletes
+      setTasks(prev => prev.filter(t => t.projectId !== id));
       storageService.deleteProject(id);
-      // We also need to delete tasks associated, simplified here
       tasks.filter(t => t.projectId === id).forEach(t => storageService.deleteTask(t.id));
     }
   };
 
-  // Task CRUD Handlers
   const handleTaskAction = (action: 'add' | 'delete', taskData: any) => {
     if (action === 'add') {
-      const newTask: Task = {
-        id: `t-${Date.now()}`,
-        name: taskData.name,
-        projectId: taskData.projectId
-      };
+      const newTask: Task = { id: `t-${Date.now()}`, name: taskData.name, projectId: taskData.projectId };
       setTasks(prev => [...prev, newTask]);
       storageService.saveTask(newTask);
     } else if (action === 'delete') {
@@ -226,16 +240,13 @@ const App: React.FC = () => {
     }
   };
 
-  const switchUser = (role: Role) => {
-    const user = MOCK_USERS.find(u => u.role === role);
-    if (user) {
-        setCurrentUser(user);
-        setCurrentView(role === Role.ADMIN ? 'admin' : 'timesheet');
-        setMobileMenuOpen(false);
-    }
+  // Time Off Handlers
+  const handleCreateTimeOff = (request: TimeOffRequest) => {
+    setTimeOffRequests(prev => [...prev, request]);
+    storageService.saveTimeOffRequest(request);
   };
 
-  if (loading) {
+  if (loading || !user) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50 text-indigo-600 gap-4">
         <Loader2 className="w-10 h-10 animate-spin" />
@@ -244,8 +255,8 @@ const App: React.FC = () => {
     );
   }
 
-  // Get current user's timesheet for the selected week
-  const activeTimesheet = timesheets.find(t => t.userId === currentUser.id && t.weekStartDate === currentWeekStart);
+  // Determine Active Timesheet
+  const activeTimesheet = timesheets.find(t => t.userId === user.id && t.weekStartDate === currentWeekStart);
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row">
@@ -274,15 +285,15 @@ const App: React.FC = () => {
 
         <div className="p-6">
             <div className="flex items-center gap-3 mb-8 bg-indigo-800/50 p-3 rounded-xl border border-indigo-700">
-                <img src={currentUser.avatar} alt="User" className="w-10 h-10 rounded-full border-2 border-indigo-500" />
+                <img src={user.avatar || 'https://ui-avatars.com/api/?background=random'} alt="User" className="w-10 h-10 rounded-full border-2 border-indigo-500" />
                 <div className="overflow-hidden">
-                    <p className="font-medium text-sm truncate">{currentUser.name}</p>
-                    <p className="text-xs text-indigo-300 capitalize">{currentUser.role.toLowerCase()}</p>
+                    <p className="font-medium text-sm truncate">{user.name}</p>
+                    <p className="text-xs text-indigo-300 capitalize">{user.role.toLowerCase()}</p>
                 </div>
             </div>
 
             <nav className="space-y-1">
-                {currentUser.role === Role.ADMIN && (
+                {user.role === Role.ADMIN && (
                     <button 
                         onClick={() => { setCurrentView('admin'); setMobileMenuOpen(false); }}
                         className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-colors ${currentView === 'admin' ? 'bg-indigo-700 text-white' : 'text-indigo-300 hover:bg-indigo-800 hover:text-white'}`}
@@ -298,7 +309,14 @@ const App: React.FC = () => {
                     <CalendarDays className="w-5 h-5" /> My Timesheets
                 </button>
 
-                {currentUser.role === Role.ADMIN && (
+                <button 
+                    onClick={() => { setCurrentView('timeoff'); setMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-colors ${currentView === 'timeoff' ? 'bg-indigo-700 text-white' : 'text-indigo-300 hover:bg-indigo-800 hover:text-white'}`}
+                >
+                    <Plane className="w-5 h-5" /> Time Off
+                </button>
+
+                {user.role === Role.ADMIN && (
                     <button 
                         onClick={() => { setCurrentView('projects'); setMobileMenuOpen(false); }}
                         className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-colors ${currentView === 'projects' ? 'bg-indigo-700 text-white' : 'text-indigo-300 hover:bg-indigo-800 hover:text-white'}`}
@@ -310,7 +328,6 @@ const App: React.FC = () => {
         </div>
 
         <div className="absolute bottom-0 left-0 right-0 p-6 bg-indigo-950 border-t border-indigo-900">
-            {/* DB Status Indicator */}
             <div className="mb-4 flex items-center gap-2 justify-center">
               {storageService.isCloudEnabled() ? (
                 <span className="flex items-center gap-1.5 text-[10px] text-green-300 bg-green-900/30 px-2 py-1 rounded-full border border-green-800">
@@ -323,12 +340,7 @@ const App: React.FC = () => {
               )}
             </div>
 
-            <p className="text-xs text-indigo-400 font-semibold uppercase mb-3">Switch Demo User</p>
-            <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => switchUser(Role.ADMIN)} className="text-xs bg-indigo-800 hover:bg-indigo-700 py-2 rounded text-indigo-100 transition-colors">Admin</button>
-                <button onClick={() => switchUser(Role.EMPLOYEE)} className="text-xs bg-indigo-800 hover:bg-indigo-700 py-2 rounded text-indigo-100 transition-colors">Employee</button>
-            </div>
-            <button className="flex items-center gap-2 mt-4 text-xs text-red-300 hover:text-red-200 w-full justify-center">
+            <button onClick={signOut} className="flex items-center gap-2 mt-2 text-xs text-red-300 hover:text-red-200 w-full justify-center bg-indigo-900/50 py-2 rounded">
                 <LogOut className="w-4 h-4" /> Sign Out
             </button>
         </div>
@@ -342,8 +354,8 @@ const App: React.FC = () => {
                     {currentView === 'admin' && 'Administration'}
                     {currentView === 'timesheet' && 'My Timesheets'}
                     {currentView === 'projects' && 'Project Management'}
+                    {currentView === 'timeoff' && 'Time Off Requests'}
                 </h1>
-                <p className="text-gray-500 text-sm mt-1">Manage time, track projects, and analyze productivity.</p>
             </div>
         </header>
 
@@ -366,7 +378,7 @@ const App: React.FC = () => {
                     <AdminView 
                         timesheets={timesheets}
                         projects={projects}
-                        users={MOCK_USERS}
+                        users={allUsers}
                         onApprove={handleApprove}
                         onReject={handleReject}
                     />
@@ -385,10 +397,48 @@ const App: React.FC = () => {
                     />
                 </div>
             )}
+
+            {currentView === 'timeoff' && (
+                 <div className="h-full overflow-y-auto pr-2">
+                    <TimeOffView 
+                        userId={user.id}
+                        requests={timeOffRequests}
+                        onCreate={handleCreateTimeOff}
+                    />
+                </div>
+            )}
         </div>
       </main>
     </div>
   );
+};
+
+// --- APP WRAPPER FOR AUTH PROVIDER ---
+const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <AuthWrapper />
+    </AuthProvider>
+  );
+};
+
+// --- AUTH WRAPPER TO DECIDE VIEW ---
+const AuthWrapper: React.FC = () => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+     return (
+        <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50 text-indigo-600 gap-4">
+            <Loader2 className="w-10 h-10 animate-spin" />
+        </div>
+     );
+  }
+
+  if (!user) {
+    return <Login />;
+  }
+
+  return <DashboardContent />;
 };
 
 export default App;

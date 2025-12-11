@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { TimeEntry, Project, Task, Timesheet, TimesheetStatus } from '../types';
 import { WEEK_DAYS } from '../constants';
-import { Plus, Trash2, Save, Send, Wand2, Loader2, Copy, Calendar, ChevronLeft, ChevronRight, Clock, Star, MinusCircle, Coffee } from 'lucide-react';
-import { generateWeeklySummary } from '../services/geminiService';
+import { Plus, Save, Send, Copy, Calendar, ChevronLeft, ChevronRight, Star, MinusCircle, Coffee, AlertTriangle } from 'lucide-react';
 
 interface TimesheetEditorProps {
   timesheet: Timesheet;
@@ -26,12 +26,11 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
   onCopyPrevious
 }) => {
   const [entries, setEntries] = useState<TimeEntry[]>(timesheet.entries);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   useEffect(() => {
     setEntries(timesheet.entries);
-    setAiSummary(null);
+    setValidationError(null); // Clear errors when loading a new sheet
   }, [timesheet]);
 
   // --- Logic Helpers ---
@@ -81,7 +80,8 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
       hours: [0, 0, 0, 0, 0, 0, 0],
       dailyTimes: Array(7).fill({ start: '', end: '' }),
       notes: type === 'break' ? 'Break' : '',
-      billingStatus: defaultBilling
+      billingStatus: defaultBilling,
+      starred: false
     };
     
     // Initialize time for user convenience
@@ -94,11 +94,10 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
     }
 
     setEntries([...entries, newEntry]);
+    setValidationError(null);
   };
 
   const handleDeleteEntryDay = (entryId: string, dayIndex: number) => {
-    // If the entry only exists for this day (all other days empty), remove it entirely
-    // Otherwise, just clear this day
     setEntries(prev => prev.map(e => {
         if (e.id === entryId) {
             const newDailyTimes = [...e.dailyTimes];
@@ -109,6 +108,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
         }
         return e;
     }).filter(e => e.hours.some(h => h > 0))); // Remove empty entries
+    setValidationError(null);
   };
 
   const updateEntry = (id: string, field: keyof TimeEntry, value: any) => {
@@ -122,6 +122,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
       }
       return e;
     }));
+    setValidationError(null);
   };
 
   const updateTime = (id: string, dayIndex: number, type: 'start' | 'end', value: string) => {
@@ -138,13 +139,52 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
       }
       return e;
     }));
+    setValidationError(null);
   };
 
-  const handleGenerateSummary = async () => {
-    setIsGenerating(true);
-    const summary = await generateWeeklySummary(entries, projects, tasks);
-    setAiSummary(summary);
-    setIsGenerating(false);
+  // --- Validation Logic ---
+
+  const timeToMinutes = (time: string) => {
+    const [h, m] = time.split(':').map(Number);
+    return h * 60 + m;
+  };
+
+  const validateOverlaps = (): string | null => {
+    // Check each day individually
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+        const dailyIntervals: { start: number; end: number; taskName: string; entryId: string }[] = [];
+
+        // Collect all time ranges for this day
+        entries.forEach(entry => {
+            const time = entry.dailyTimes[dayIndex];
+            if (time.start && time.end && entry.hours[dayIndex] > 0) {
+                const taskName = tasks.find(t => t.id === entry.taskId)?.name || 
+                                 (entry.notes === 'Break' ? 'Break' : 'Unknown Task');
+                
+                dailyIntervals.push({
+                    start: timeToMinutes(time.start),
+                    end: timeToMinutes(time.end),
+                    taskName,
+                    entryId: entry.id
+                });
+            }
+        });
+
+        // Sort by start time
+        dailyIntervals.sort((a, b) => a.start - b.start);
+
+        // Check for overlaps
+        for (let i = 0; i < dailyIntervals.length - 1; i++) {
+            const current = dailyIntervals[i];
+            const next = dailyIntervals[i + 1];
+
+            // If next start is before current end
+            if (next.start < current.end) {
+                return `Time Conflict on ${WEEK_DAYS[dayIndex]}: "${current.taskName}" overlaps with "${next.taskName}". Please fix the times.`;
+            }
+        }
+    }
+    return null;
   };
 
   const handleSaveLocal = () => {
@@ -152,6 +192,12 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
   };
 
   const handleSubmitLocal = () => {
+    const error = validateOverlaps();
+    if (error) {
+        setValidationError(error);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+    }
     onSubmit({ ...timesheet, entries, totalHours: calculateTotal(), status: TimesheetStatus.SUBMITTED });
   };
 
@@ -182,11 +228,6 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                 
                 {/* Calendar Trigger - Input Overlay Method */}
                 <div className="relative group min-w-[200px] h-full">
-                     {/* 
-                       The date input is absolutely positioned to cover the entire container.
-                       opacity-0 makes it invisible, but it captures the clicks directly.
-                       This is the most reliable way to trigger native date pickers.
-                     */}
                     <input 
                         type="date"
                         value={weekStartDate}
@@ -195,7 +236,6 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                         aria-label="Select date"
                     />
                     
-                    {/* Visual Button - purely decorative but shows current state */}
                     <div className="px-4 py-1.5 flex items-center justify-center gap-2 text-sm font-semibold text-gray-700 w-full group-hover:text-indigo-600 transition-colors">
                         <Calendar className="w-4 h-4 text-indigo-500 mb-0.5" />
                         <span>
@@ -223,9 +263,6 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                <button onClick={onCopyPrevious} className="btn-secondary flex items-center gap-2 text-xs px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium active:bg-gray-200 transition-colors">
                  <Copy className="w-4 h-4" /> Copy Last Week
                </button>
-               <button onClick={handleGenerateSummary} className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 font-medium transition-colors">
-                  {isGenerating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />} AI Summary
-               </button>
                <button onClick={handleSaveLocal} className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium">
                  <Save className="w-4 h-4" /> Save
                </button>
@@ -237,14 +274,13 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
          </div>
       </div>
 
-      {/* AI Summary Panel */}
-      {aiSummary && (
-        <div className="p-4 bg-purple-50 border-b border-purple-100 animate-in slide-in-from-top-2">
-            <div className="flex justify-between items-start">
-                <p className="text-sm text-purple-900 whitespace-pre-line leading-relaxed">{aiSummary}</p>
-                <button onClick={() => setAiSummary(null)} className="text-purple-400 hover:text-purple-600 ml-4"><Clock className="w-4 h-4 rotate-45" /></button>
-            </div>
-        </div>
+      {/* Error Banner */}
+      {validationError && (
+          <div className="bg-red-50 border-b border-red-200 p-3 flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+              <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
+              <p className="text-sm text-red-700 font-medium">{validationError}</p>
+              <button onClick={() => setValidationError(null)} className="ml-auto text-red-400 hover:text-red-600 font-bold">✕</button>
+          </div>
       )}
 
       {/* Main List View */}
@@ -271,33 +307,45 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                     <div className="divide-y divide-gray-100">
                         {dayEntries.map((entry) => {
                             const isBreak = entry.notes === 'Break' || tasks.find(t => t.id === entry.taskId)?.name === 'Meal';
+                            const startTime = entry.dailyTimes[dayIndex].start;
+                            const endTime = entry.dailyTimes[dayIndex].end;
                             
                             return (
                                 <div key={entry.id + dayIndex} className="p-3 md:p-4 hover:bg-gray-50 transition-colors group">
                                     <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
                                         
-                                        {/* Time Column with High Contrast Inputs */}
-                                        <div className="flex items-center gap-2 min-w-[240px]">
-                                            <div className="flex items-center rounded overflow-hidden shadow-sm bg-gray-800 border border-gray-700">
-                                                <input 
-                                                    disabled={isReadOnly}
-                                                    type="time" 
-                                                    value={entry.dailyTimes[dayIndex].start} 
-                                                    onChange={(e) => updateTime(entry.id, dayIndex, 'start', e.target.value)}
-                                                    className="w-20 p-1.5 text-xs text-center outline-none bg-gray-800 text-white font-medium border-r border-gray-600 focus:bg-gray-700 transition-colors"
-                                                    style={{colorScheme: 'dark'}} 
-                                                />
-                                                <span className="bg-gray-800 px-2 text-gray-400 text-xs">-</span>
-                                                <input 
-                                                    disabled={isReadOnly}
-                                                    type="time" 
-                                                    value={entry.dailyTimes[dayIndex].end} 
-                                                    onChange={(e) => updateTime(entry.id, dayIndex, 'end', e.target.value)}
-                                                    className="w-20 p-1.5 text-xs text-center outline-none bg-gray-800 text-white font-medium focus:bg-gray-700 transition-colors"
-                                                    style={{colorScheme: 'dark'}}
-                                                />
+                                        {/* Styled Time Component - Clean Capsule Look */}
+                                        <div className="flex items-center gap-3 min-w-[240px]">
+                                            <div className="flex items-center bg-gray-900 border border-gray-700 rounded-md shadow-sm overflow-hidden w-48">
+                                                {/* Start Time */}
+                                                <div className="px-2 py-1.5 bg-gray-800 border-r border-gray-700 flex-1 relative">
+                                                    <input 
+                                                        disabled={isReadOnly}
+                                                        type="time" 
+                                                        value={startTime} 
+                                                        onChange={(e) => updateTime(entry.id, dayIndex, 'start', e.target.value)}
+                                                        className="bg-transparent text-white text-xs font-mono focus:outline-none w-full text-center appearance-none"
+                                                        style={{ colorScheme: 'dark' }}
+                                                    />
+                                                </div>
+
+                                                {/* Separator */}
+                                                <div className="bg-gray-900 px-2 text-gray-500 text-xs font-bold">-</div>
+
+                                                {/* End Time */}
+                                                <div className="px-2 py-1.5 bg-gray-800 border-l border-gray-700 flex-1 relative">
+                                                    <input 
+                                                        disabled={isReadOnly}
+                                                        type="time" 
+                                                        value={endTime} 
+                                                        onChange={(e) => updateTime(entry.id, dayIndex, 'end', e.target.value)}
+                                                        className="bg-transparent text-white text-xs font-mono focus:outline-none w-full text-center appearance-none"
+                                                        style={{ colorScheme: 'dark' }}
+                                                    />
+                                                </div>
                                             </div>
-                                            <span className="text-sm font-bold text-gray-800 w-12 text-right">
+
+                                            <span className="text-sm font-bold text-gray-800 w-10 text-right font-mono">
                                                 {entry.hours[dayIndex].toFixed(2)}
                                             </span>
                                         </div>
@@ -305,9 +353,9 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                         {/* Task & Project Details OR Break Label */}
                                         <div className="flex-1 w-full">
                                             {isBreak ? (
-                                                <div className="flex items-center gap-2 py-1 px-3 bg-orange-50 text-orange-700 rounded-md border border-orange-100 w-fit">
+                                                <div className="flex items-center gap-2 py-1.5 px-3 bg-orange-50 text-orange-800 rounded-md border border-orange-200 w-fit shadow-sm">
                                                     <Coffee className="w-4 h-4" />
-                                                    <span className="text-sm font-semibold">Break Time</span>
+                                                    <span className="text-sm font-semibold">Break / Meal</span>
                                                 </div>
                                             ) : (
                                                 <div className="grid grid-cols-1 md:grid-cols-12 gap-3 w-full">
@@ -381,13 +429,18 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                         {!isReadOnly && (
                                             <div className="flex items-center gap-2 pt-1 md:pt-0">
                                                 {!isBreak && (
-                                                    <button className="text-gray-400 hover:text-yellow-500">
-                                                        <Star className="w-4 h-4" />
+                                                    <button 
+                                                        onClick={() => updateEntry(entry.id, 'starred', !entry.starred)}
+                                                        className={`${entry.starred ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'}`}
+                                                        title={entry.starred ? "Unstar" : "Star this entry"}
+                                                    >
+                                                        <Star className={`w-4 h-4 ${entry.starred ? 'fill-yellow-500' : ''}`} />
                                                     </button>
                                                 )}
                                                 <button 
                                                     onClick={() => handleDeleteEntryDay(entry.id, dayIndex)}
                                                     className="text-gray-400 hover:text-red-500"
+                                                    title="Remove entry"
                                                 >
                                                     <MinusCircle className="w-5 h-5" />
                                                 </button>

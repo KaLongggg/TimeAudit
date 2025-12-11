@@ -1,35 +1,15 @@
-import { initializeApp } from 'firebase/app';
-import { 
-  getFirestore, 
-  collection, 
-  getDocs, 
-  doc, 
-  setDoc, 
-  deleteDoc,
-  query
-} from 'firebase/firestore';
-import { firebaseConfig, isFirebaseConfigured } from './firebaseConfig';
-import { Project, Task, Timesheet, User } from '../types';
-import { MOCK_PROJECTS, MOCK_TASKS, MOCK_TIMESHEETS, MOCK_USERS } from '../constants';
 
-// Initialize Firebase only if configured
-let db: any = null;
-if (isFirebaseConfigured()) {
-  try {
-    const app = initializeApp(firebaseConfig);
-    db = getFirestore(app);
-    console.log("🔥 Firebase initialized successfully");
-  } catch (e) {
-    console.error("Firebase init failed:", e);
-  }
-}
+import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { Project, Task, Timesheet, User, TimeOffRequest } from '../types';
+import { MOCK_PROJECTS, MOCK_TASKS, MOCK_TIMESHEETS, MOCK_USERS } from '../constants';
 
 // --- Storage Keys for LocalStorage ---
 const LS_KEYS = {
   PROJECTS: 'repli_projects',
   TASKS: 'repli_tasks',
   TIMESHEETS: 'repli_timesheets',
-  USERS: 'repli_users'
+  USERS: 'repli_users',
+  TIMEOFF: 'repli_timeoff'
 };
 
 // --- Generic Helpers ---
@@ -47,35 +27,56 @@ const saveToLS = (key: string, data: any) => {
 
 export const storageService = {
   
-  isCloudEnabled: () => isFirebaseConfigured() && db !== null,
+  isCloudEnabled: () => isSupabaseConfigured(),
 
   // --- INITIAL LOAD ---
   loadAllData: async () => {
-    // If Firebase is configured, try to fetch from it
+    // If Supabase is configured, try to fetch from it
     if (storageService.isCloudEnabled()) {
       try {
-        const [projects, tasks, timesheets] = await Promise.all([
-          getDocs(collection(db, 'projects')),
-          getDocs(collection(db, 'tasks')),
-          getDocs(collection(db, 'timesheets'))
+        console.log("⚡ Connecting to Supabase...");
+        
+        const [projectsRes, tasksRes, timesheetsRes, usersRes, timeOffRes] = await Promise.all([
+          supabase.from('projects').select('*'),
+          supabase.from('tasks').select('*'),
+          supabase.from('timesheets').select('*'),
+          supabase.from('users').select('*'),
+          supabase.from('time_off_requests').select('*')
         ]);
 
-        const projectData = projects.docs.map(d => d.data() as Project);
-        const taskData = tasks.docs.map(d => d.data() as Task);
-        const timesheetData = timesheets.docs.map(d => d.data() as Timesheet);
+        if (projectsRes.error) throw projectsRes.error;
+        if (tasksRes.error) throw tasksRes.error;
+        if (timesheetsRes.error) throw timesheetsRes.error;
+        // timeOffRes.error might happen if table doesn't exist yet, handle gracefully
 
-        // If DB is empty, seed it with mock data? No, let's just return empty arrays or mocks if strictly empty
-        // For better UX, if completely empty, we might want to return defaults, but let's assume real DB usage
+        const projectData = projectsRes.data as Project[];
+        const taskData = tasksRes.data as Task[];
+        const timesheetData = timesheetsRes.data as Timesheet[];
+        const userData = usersRes.data as unknown as User[];
         
+        // Map snake_case DB columns to camelCase types if necessary
+        const timeOffData = (timeOffRes.data || []).map((row: any) => ({
+           id: row.id,
+           userId: row.user_id,
+           startDate: row.start_date,
+           endDate: row.end_date,
+           startTime: row.start_time,
+           endTime: row.end_time,
+           type: row.type,
+           reason: row.reason,
+           status: row.status
+        })) as TimeOffRequest[];
+
         return {
           projects: projectData.length ? projectData : MOCK_PROJECTS,
           tasks: taskData.length ? taskData : MOCK_TASKS,
           timesheets: timesheetData.length ? timesheetData : MOCK_TIMESHEETS,
-          users: MOCK_USERS // Users typically managed via Auth, keeping mock for now
+          users: userData && userData.length > 0 ? userData : MOCK_USERS,
+          timeOffRequests: timeOffData
         };
       } catch (error) {
-        console.error("Error loading from Firebase:", error);
-        alert("Failed to load from Cloud DB. Falling back to local storage.");
+        console.error("Error loading from Supabase:", error);
+        alert("Failed to load from Supabase. Check console for table schema errors or API keys. Falling back to local storage.");
       }
     }
 
@@ -84,48 +85,43 @@ export const storageService = {
       projects: loadFromLS<Project[]>(LS_KEYS.PROJECTS, MOCK_PROJECTS),
       tasks: loadFromLS<Task[]>(LS_KEYS.TASKS, MOCK_TASKS),
       timesheets: loadFromLS<Timesheet[]>(LS_KEYS.TIMESHEETS, MOCK_TIMESHEETS),
-      users: MOCK_USERS
+      users: MOCK_USERS,
+      timeOffRequests: loadFromLS<TimeOffRequest[]>(LS_KEYS.TIMEOFF, [])
     };
   },
 
   // --- PROJECTS ---
   saveProject: async (project: Project) => {
-    // 1. Local
     const projects = loadFromLS<Project[]>(LS_KEYS.PROJECTS, MOCK_PROJECTS);
     const updated = projects.some(p => p.id === project.id) 
       ? projects.map(p => p.id === project.id ? project : p)
       : [...projects, project];
     saveToLS(LS_KEYS.PROJECTS, updated);
 
-    // 2. Cloud
     if (storageService.isCloudEnabled()) {
-      await setDoc(doc(db, 'projects', project.id), project);
+      await supabase.from('projects').upsert(project);
     }
   },
 
   deleteProject: async (projectId: string) => {
-    // 1. Local
     const projects = loadFromLS<Project[]>(LS_KEYS.PROJECTS, MOCK_PROJECTS);
     saveToLS(LS_KEYS.PROJECTS, projects.filter(p => p.id !== projectId));
 
-    // 2. Cloud
     if (storageService.isCloudEnabled()) {
-      await deleteDoc(doc(db, 'projects', projectId));
+      await supabase.from('projects').delete().eq('id', projectId);
     }
   },
 
   // --- TASKS ---
   saveTask: async (task: Task) => {
-    // 1. Local
     const tasks = loadFromLS<Task[]>(LS_KEYS.TASKS, MOCK_TASKS);
     const updated = tasks.some(t => t.id === task.id)
       ? tasks.map(t => t.id === task.id ? task : t)
       : [...tasks, task];
     saveToLS(LS_KEYS.TASKS, updated);
 
-    // 2. Cloud
     if (storageService.isCloudEnabled()) {
-      await setDoc(doc(db, 'tasks', task.id), task);
+      await supabase.from('tasks').upsert(task);
     }
   },
 
@@ -134,22 +130,45 @@ export const storageService = {
     saveToLS(LS_KEYS.TASKS, tasks.filter(t => t.id !== taskId));
 
     if (storageService.isCloudEnabled()) {
-      await deleteDoc(doc(db, 'tasks', taskId));
+      await supabase.from('tasks').delete().eq('id', taskId);
     }
   },
 
   // --- TIMESHEETS ---
   saveTimesheet: async (timesheet: Timesheet) => {
-    // 1. Local
     const sheets = loadFromLS<Timesheet[]>(LS_KEYS.TIMESHEETS, MOCK_TIMESHEETS);
     const updated = sheets.some(t => t.id === timesheet.id)
       ? sheets.map(t => t.id === timesheet.id ? timesheet : t)
       : [...sheets, timesheet];
     saveToLS(LS_KEYS.TIMESHEETS, updated);
 
+    if (storageService.isCloudEnabled()) {
+      await supabase.from('timesheets').upsert(timesheet);
+    }
+  },
+
+  // --- TIME OFF ---
+  saveTimeOffRequest: async (request: TimeOffRequest) => {
+    // 1. Local
+    const requests = loadFromLS<TimeOffRequest[]>(LS_KEYS.TIMEOFF, []);
+    const updated = requests.some(r => r.id === request.id)
+      ? requests.map(r => r.id === request.id ? request : r)
+      : [...requests, request];
+    saveToLS(LS_KEYS.TIMEOFF, updated);
+
     // 2. Cloud
     if (storageService.isCloudEnabled()) {
-      await setDoc(doc(db, 'timesheets', timesheet.id), timesheet);
+        await supabase.from('time_off_requests').upsert({
+            id: request.id,
+            user_id: request.userId,
+            start_date: request.startDate,
+            end_date: request.endDate,
+            start_time: request.startTime,
+            end_time: request.endTime,
+            type: request.type,
+            reason: request.reason,
+            status: request.status
+        });
     }
   }
 };
