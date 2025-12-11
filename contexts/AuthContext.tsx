@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { Session, User as SupabaseUser } from '@supabase/supabase-js';
@@ -21,11 +20,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     // 1. Get initial session
     const initAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
-      if (session?.user) {
-        await fetchUserProfile(session.user);
-      } else {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        
+        if (error) {
+           throw error;
+        }
+
+        setSession(data.session);
+        
+        if (data.session?.user) {
+          await fetchUserProfile(data.session.user);
+        } else {
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("Auth initialization failed:", err);
+        // Fail gracefully: stop loading so user sees Login screen (or error state)
+        // rather than infinite spinner.
         setLoading(false);
       }
     };
