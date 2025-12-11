@@ -1,5 +1,5 @@
 {
-  "name": "RepliClone AI",
-  "description": "A smart timesheet management system featuring employee time tracking, admin approvals, project management, and AI-powered productivity insights.",
+  "name": "TimeAudit",
+  "description": "A smart timesheet management system featuring employee time tracking, admin approvals, and project management.",
   "requestFramePermissions": []
 }

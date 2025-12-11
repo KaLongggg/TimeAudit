@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
   MOCK_USERS // Keep for fallback if needed
@@ -263,7 +262,7 @@ const DashboardContent: React.FC = () => {
       {/* Mobile Header */}
       <div className="md:hidden bg-indigo-900 text-white p-4 flex justify-between items-center shadow-md z-20 sticky top-0">
           <div className="flex items-center gap-2 font-bold text-lg">
-              <Clock className="w-6 h-6 text-indigo-300" /> RepliClone AI
+              <Clock className="w-6 h-6 text-indigo-300" /> TimeAudit
           </div>
           <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
               <Menu className="w-6 h-6" />
@@ -280,7 +279,7 @@ const DashboardContent: React.FC = () => {
            <div className="bg-indigo-700 p-2 rounded-lg">
              <Clock className="w-6 h-6 text-white" />
            </div>
-           <span className="font-bold text-xl tracking-tight">RepliClone AI</span>
+           <span className="font-bold text-xl tracking-tight">TimeAudit</span>
         </div>
 
         <div className="p-6">

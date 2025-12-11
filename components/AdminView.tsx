@@ -1,9 +1,7 @@
-
 import React, { useState } from 'react';
 import { Timesheet, Project, TimesheetStatus, User, TimeOffRequest, TimeOffStatus } from '../types';
-import { CheckCircle, XCircle, Clock, BrainCircuit, Loader2, Calendar, User as UserIcon } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Calendar, User as UserIcon } from 'lucide-react';
 import { DashboardStats } from './DashboardStats';
-import { analyzeTeamProductivity } from '../services/geminiService';
 import { storageService } from '../services/storage';
 
 interface AdminViewProps {
@@ -16,8 +14,6 @@ interface AdminViewProps {
 
 export const AdminView: React.FC<AdminViewProps> = ({ timesheets, projects, users, onApprove, onReject }) => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'approvals' | 'timeoff'>('dashboard');
-  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   
   // Local state to track updates immediately
   const [localRequests, setLocalRequests] = useState<TimeOffRequest[]>([]);
@@ -37,13 +33,6 @@ export const AdminView: React.FC<AdminViewProps> = ({ timesheets, projects, user
   const getUserName = (id: string) => users.find(u => u.id === id)?.name || 'Unknown';
   const getUserAvatar = (id: string) => users.find(u => u.id === id)?.avatar || '';
 
-  const handleRunAnalysis = async () => {
-    setIsAnalyzing(true);
-    const result = await analyzeTeamProductivity(timesheets, projects);
-    setAiAnalysis(result);
-    setIsAnalyzing(false);
-  };
-  
   const handleTimeOffAction = async (request: TimeOffRequest, status: TimeOffStatus) => {
       const updated = { ...request, status };
       setLocalRequests(prev => prev.map(r => r.id === request.id ? updated : r));
@@ -79,35 +68,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ timesheets, projects, user
                 )}
             </button>
         </div>
-        {activeTab === 'dashboard' && (
-             <button 
-             onClick={handleRunAnalysis}
-             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 rounded-lg shadow-sm transition-all"
-           >
-             {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <BrainCircuit className="w-4 h-4" />}
-             AI Team Insight
-           </button>
-        )}
       </div>
 
       {activeTab === 'dashboard' && (
         <div className="animate-in fade-in duration-500">
-           {aiAnalysis && (
-            <div className="mb-6 p-6 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl border border-indigo-100 shadow-sm">
-                <div className="flex justify-between items-start mb-4">
-                    <h3 className="text-indigo-900 font-bold flex items-center gap-2">
-                        <BrainCircuit className="w-5 h-5" /> Team Productivity Analysis
-                    </h3>
-                    <button onClick={() => setAiAnalysis(null)} className="text-gray-400 hover:text-gray-600">×</button>
-                </div>
-                <div className="prose prose-sm prose-indigo max-w-none text-gray-700">
-                    <pre className="whitespace-pre-wrap font-sans text-sm">{aiAnalysis}</pre>
-                </div>
-            </div>
-          )}
-          
           <DashboardStats timesheets={timesheets} projects={projects} />
-          {/* Recent activity list preserved... */}
         </div>
       )}
 

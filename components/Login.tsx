@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { Loader2, Lock, Mail, User as UserIcon, AlertCircle, ArrowRight } from 'lucide-react';
@@ -82,7 +81,7 @@ export const Login: React.FC = () => {
               {isSignUp ? "Create Account" : "Welcome Back"}
             </h2>
             <p className="text-sm text-gray-500 mt-2">
-              {isSignUp ? "Join RepliClone AI to track your time." : "Sign in to manage your timesheets."}
+              {isSignUp ? "Join TimeAudit to track your time." : "Sign in to manage your timesheets."}
             </p>
           </div>
 

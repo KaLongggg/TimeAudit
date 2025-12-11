@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { TimeEntry, Project, Task, Timesheet, TimesheetStatus } from '../types';
 import { WEEK_DAYS } from '../constants';
 import { Plus, Save, Send, Copy, Calendar, ChevronLeft, ChevronRight, Star, MinusCircle, Coffee, AlertTriangle } from 'lucide-react';
@@ -27,6 +27,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
 }) => {
   const [entries, setEntries] = useState<TimeEntry[]>(timesheet.entries);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const dateInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setEntries(timesheet.entries);
@@ -207,6 +208,15 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
     }
   };
 
+  const openDatePicker = () => {
+      try {
+          dateInputRef.current?.showPicker();
+      } catch (err) {
+          // Fallback for browsers not supporting showPicker
+          dateInputRef.current?.click();
+      }
+  };
+
   const isReadOnly = timesheet.status === TimesheetStatus.SUBMITTED || timesheet.status === TimesheetStatus.APPROVED;
 
   // Render Logic
@@ -222,21 +232,26 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full">
       {/* Top Bar */}
       <div className="p-4 border-b border-gray-200 bg-white flex flex-col md:flex-row justify-between items-center gap-4 sticky top-0 z-20 shadow-sm">
-         <div className="flex items-center gap-4">
-             <div className="flex items-center bg-gray-50 border border-gray-200 rounded-lg p-0.5 relative group">
-                <button onClick={() => onWeekChange('prev')} className="p-1.5 hover:bg-white rounded shadow-sm text-gray-600 transition-all z-20 relative"><ChevronLeft className="w-5 h-5"/></button>
+         <div className="flex items-center gap-4 w-full md:w-auto">
+             <div className="flex items-stretch bg-gray-50 border border-gray-200 rounded-lg p-0.5 relative group flex-1 md:flex-none">
+                <button onClick={() => onWeekChange('prev')} className="p-1.5 hover:bg-white rounded shadow-sm text-gray-600 transition-all z-20 relative flex items-center justify-center"><ChevronLeft className="w-5 h-5"/></button>
                 
                 {/* Calendar Trigger - Input Overlay Method */}
-                <div className="relative group min-w-[200px] h-full">
+                <div 
+                    className="relative group flex-1 min-w-[200px] flex items-center justify-center cursor-pointer"
+                    onClick={openDatePicker}
+                >
                     <input 
+                        ref={dateInputRef}
                         type="date"
                         value={weekStartDate}
                         onChange={handleDatePick}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-30"
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-30 date-input-full"
                         aria-label="Select date"
+                        style={{ display: 'block' }}
                     />
                     
-                    <div className="px-4 py-1.5 flex items-center justify-center gap-2 text-sm font-semibold text-gray-700 w-full group-hover:text-indigo-600 transition-colors">
+                    <div className="px-4 py-1.5 flex items-center justify-center gap-2 text-sm font-semibold text-gray-700 w-full group-hover:text-indigo-600 transition-colors select-none">
                         <Calendar className="w-4 h-4 text-indigo-500 mb-0.5" />
                         <span>
                             {new Date(weekDates[0]).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} 
@@ -246,9 +261,9 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                     </div>
                 </div>
 
-                <button onClick={() => onWeekChange('next')} className="p-1.5 hover:bg-white rounded shadow-sm text-gray-600 transition-all z-20 relative"><ChevronRight className="w-5 h-5"/></button>
+                <button onClick={() => onWeekChange('next')} className="p-1.5 hover:bg-white rounded shadow-sm text-gray-600 transition-all z-20 relative flex items-center justify-center"><ChevronRight className="w-5 h-5"/></button>
              </div>
-             <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase border ${
+             <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase border whitespace-nowrap ${
                 timesheet.status === TimesheetStatus.APPROVED ? 'bg-green-50 text-green-700 border-green-200' : 
                 timesheet.status === TimesheetStatus.SUBMITTED ? 'bg-blue-50 text-blue-700 border-blue-200' :
                 'bg-gray-100 text-gray-600 border-gray-200'
@@ -257,11 +272,11 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
              </span>
          </div>
 
-         <div className="flex gap-2">
+         <div className="flex gap-2 w-full md:w-auto justify-end">
            {!isReadOnly && (
              <>
-               <button onClick={onCopyPrevious} className="btn-secondary flex items-center gap-2 text-xs px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium active:bg-gray-200 transition-colors">
-                 <Copy className="w-4 h-4" /> Copy Last Week
+               <button onClick={onCopyPrevious} className="btn-secondary flex items-center gap-2 text-xs px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium active:bg-gray-200 transition-colors whitespace-nowrap">
+                 <Copy className="w-4 h-4" /> <span className="hidden sm:inline">Copy Last Week</span>
                </button>
                <button onClick={handleSaveLocal} className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium">
                  <Save className="w-4 h-4" /> Save
