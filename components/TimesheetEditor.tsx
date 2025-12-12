@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TimeEntry, Project, Task, Timesheet, TimesheetStatus } from '../types';
 import { WEEK_DAYS } from '../constants';
-import { Plus, Save, Send, Copy, Calendar, ChevronLeft, ChevronRight, Star, MinusCircle, Coffee, AlertTriangle } from 'lucide-react';
+import { Plus, Save, Send, Copy, Calendar, ChevronLeft, ChevronRight, Star, MinusCircle, Coffee, AlertTriangle, LayoutGrid, List } from 'lucide-react';
 
 interface TimesheetEditorProps {
   timesheet: Timesheet;
@@ -27,19 +27,18 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
 }) => {
   const [entries, setEntries] = useState<TimeEntry[]>(timesheet.entries);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'grid' | 'detail'>('grid');
   const dateInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setEntries(timesheet.entries);
-    setValidationError(null); // Clear errors when loading a new sheet
+    setValidationError(null);
   }, [timesheet]);
 
   // --- Logic Helpers ---
 
   const getWeekDates = (startStr: string) => {
-    // startStr is YYYY-MM-DD
     const [y, m, d] = startStr.split('-').map(Number);
-    // Use UTC to avoid timezone shifts
     const start = new Date(Date.UTC(y, m - 1, d));
     return Array.from({ length: 7 }, (_, i) => {
       const d = new Date(start);
@@ -65,18 +64,15 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
     return entries.reduce((acc, entry) => acc + entry.hours.reduce((a, b) => a + b, 0), 0);
   };
 
-  // Helper to check if a task is accessible by the current user
-  // We use timesheet.userId to check eligibility
   const isTaskAccessible = (task: Task) => {
       if (!task.assignedUserIds || task.assignedUserIds.length === 0) return true;
       return task.assignedUserIds.includes(timesheet.userId);
   };
 
+  // --- Actions ---
+
   const handleAddEntryForDay = (dayIndex: number, type: 'work' | 'break' = 'work') => {
-    // Create a new entry specifically for this day
     const defaultProject = projects[0]?.id || '';
-    
-    // Find a default task that is accessible
     const availableTasks = tasks.filter(t => t.projectId === defaultProject && isTaskAccessible(t));
     const breakTask = tasks.find(t => (t.name.toLowerCase().includes('meal') || t.name.toLowerCase().includes('break')) && isTaskAccessible(t));
 
@@ -97,17 +93,39 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
       starred: false
     };
     
-    // Initialize time for user convenience
-    if (type === 'break') {
-        newEntry.dailyTimes[dayIndex] = { start: '12:00', end: '13:00' };
-        newEntry.hours[dayIndex] = 1.00;
-    } else {
-        newEntry.dailyTimes[dayIndex] = { start: '09:00', end: '17:00' };
-        newEntry.hours[dayIndex] = 8.00;
+    if (viewMode === 'detail') {
+      if (type === 'break') {
+          newEntry.dailyTimes[dayIndex] = { start: '12:00', end: '13:00' };
+          newEntry.hours[dayIndex] = 1.00;
+      } else {
+          newEntry.dailyTimes[dayIndex] = { start: '09:00', end: '17:00' };
+          newEntry.hours[dayIndex] = 8.00;
+      }
     }
 
     setEntries([...entries, newEntry]);
     setValidationError(null);
+  };
+
+  const handleAddRow = () => {
+    const defaultProject = projects[0]?.id || '';
+    const availableTasks = tasks.filter(t => t.projectId === defaultProject && isTaskAccessible(t));
+    
+    const newEntry: TimeEntry = {
+      id: Math.random().toString(36).substr(2, 9),
+      projectId: defaultProject,
+      taskId: availableTasks[0]?.id || '',
+      hours: [0, 0, 0, 0, 0, 0, 0],
+      dailyTimes: Array(7).fill({ start: '', end: '' }),
+      notes: '',
+      billingStatus: 'Billable',
+      starred: false
+    };
+    setEntries([...entries, newEntry]);
+  };
+
+  const handleDeleteEntry = (entryId: string) => {
+    setEntries(prev => prev.filter(e => e.id !== entryId));
   };
 
   const handleDeleteEntryDay = (entryId: string, dayIndex: number) => {
@@ -120,7 +138,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
             return { ...e, dailyTimes: newDailyTimes, hours: newHours };
         }
         return e;
-    }).filter(e => e.hours.some(h => h > 0))); // Remove empty entries
+    }).filter(e => e.hours.some(h => h > 0))); 
     setValidationError(null);
   };
 
@@ -155,6 +173,23 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
     setValidationError(null);
   };
 
+  const updateHoursDirectly = (id: string, dayIndex: number, value: string) => {
+    const numVal = parseFloat(value);
+    setEntries(entries.map(e => {
+        if (e.id === id) {
+            const newHours = [...e.hours];
+            newHours[dayIndex] = isNaN(numVal) ? 0 : numVal;
+            
+            // Clear start/end time if entering duration directly to avoid conflicts
+            const newDailyTimes = [...e.dailyTimes];
+            newDailyTimes[dayIndex] = { start: '', end: '' };
+            
+            return { ...e, hours: newHours, dailyTimes: newDailyTimes };
+        }
+        return e;
+    }));
+  };
+
   // --- Validation Logic ---
 
   const timeToMinutes = (time: string) => {
@@ -163,17 +198,14 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
   };
 
   const validateOverlaps = (): string | null => {
-    // Check each day individually
+    // Only validate overlaps if we have start/end times
     for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
         const dailyIntervals: { start: number; end: number; taskName: string; entryId: string }[] = [];
 
-        // Collect all time ranges for this day
         entries.forEach(entry => {
             const time = entry.dailyTimes[dayIndex];
             if (time.start && time.end && entry.hours[dayIndex] > 0) {
-                const taskName = tasks.find(t => t.id === entry.taskId)?.name || 
-                                 (entry.notes === 'Break' ? 'Break' : 'Unknown Task');
-                
+                const taskName = tasks.find(t => t.id === entry.taskId)?.name || 'Unknown Task';
                 dailyIntervals.push({
                     start: timeToMinutes(time.start),
                     end: timeToMinutes(time.end),
@@ -183,17 +215,13 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
             }
         });
 
-        // Sort by start time
         dailyIntervals.sort((a, b) => a.start - b.start);
 
-        // Check for overlaps
         for (let i = 0; i < dailyIntervals.length - 1; i++) {
             const current = dailyIntervals[i];
             const next = dailyIntervals[i + 1];
-
-            // If next start is before current end
             if (next.start < current.end) {
-                return `Time Conflict on ${WEEK_DAYS[dayIndex]}: "${current.taskName}" overlaps with "${next.taskName}". Please fix the times.`;
+                return `Time Conflict on ${WEEK_DAYS[dayIndex]}: "${current.taskName}" overlaps with "${next.taskName}".`;
             }
         }
     }
@@ -224,14 +252,13 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
       try {
           dateInputRef.current?.showPicker();
       } catch (err) {
-          // Fallback for browsers not supporting showPicker
           dateInputRef.current?.click();
       }
   };
 
   const isReadOnly = timesheet.status === TimesheetStatus.SUBMITTED || timesheet.status === TimesheetStatus.APPROVED;
 
-  // Render Logic
+  // Render Helpers
   const getEntriesForDay = (dayIndex: number) => {
     return entries.filter(e => e.hours[dayIndex] > 0 || (e.dailyTimes[dayIndex].start && e.dailyTimes[dayIndex].end));
   };
@@ -248,7 +275,6 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
              <div className="flex items-stretch bg-gray-50 border border-gray-200 rounded-lg p-0.5 relative group flex-1 md:flex-none">
                 <button onClick={() => onWeekChange('prev')} className="p-1.5 hover:bg-white rounded shadow-sm text-gray-600 transition-all z-20 relative flex items-center justify-center"><ChevronLeft className="w-5 h-5"/></button>
                 
-                {/* Calendar Trigger - Input Overlay Method */}
                 <div 
                     className="relative group flex-1 min-w-[200px] flex items-center justify-center cursor-pointer"
                     onClick={openDatePicker}
@@ -259,10 +285,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                         value={weekStartDate}
                         onChange={handleDatePick}
                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-30 date-input-full"
-                        aria-label="Select date"
-                        style={{ display: 'block' }}
                     />
-                    
                     <div className="px-4 py-1.5 flex items-center justify-center gap-2 text-sm font-semibold text-gray-700 w-full group-hover:text-indigo-600 transition-colors select-none">
                         <Calendar className="w-4 h-4 text-indigo-500 mb-0.5" />
                         <span>
@@ -275,6 +298,22 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
 
                 <button onClick={() => onWeekChange('next')} className="p-1.5 hover:bg-white rounded shadow-sm text-gray-600 transition-all z-20 relative flex items-center justify-center"><ChevronRight className="w-5 h-5"/></button>
              </div>
+             
+             <div className="hidden md:flex bg-gray-100 p-0.5 rounded-lg border border-gray-200">
+                <button 
+                  onClick={() => setViewMode('grid')}
+                  className={`p-1.5 rounded-md flex items-center gap-1 text-xs font-bold transition-all ${viewMode === 'grid' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  <LayoutGrid className="w-4 h-4" /> Grid
+                </button>
+                <button 
+                  onClick={() => setViewMode('detail')}
+                  className={`p-1.5 rounded-md flex items-center gap-1 text-xs font-bold transition-all ${viewMode === 'detail' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  <List className="w-4 h-4" /> Detail
+                </button>
+             </div>
+
              <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase border whitespace-nowrap ${
                 timesheet.status === TimesheetStatus.APPROVED ? 'bg-green-50 text-green-700 border-green-200' : 
                 timesheet.status === TimesheetStatus.SUBMITTED ? 'bg-blue-50 text-blue-700 border-blue-200' :
@@ -301,7 +340,6 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
          </div>
       </div>
 
-      {/* Error Banner */}
       {validationError && (
           <div className="bg-red-50 border-b border-red-200 p-3 flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
               <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
@@ -310,209 +348,334 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
           </div>
       )}
 
-      {/* Main List View */}
-      <div className="flex-1 overflow-y-auto bg-gray-100 p-4 space-y-4">
-        {weekDates.map((date, dayIndex) => {
-            const dayEntries = getEntriesForDay(dayIndex);
-            const isToday = new Date().toDateString() === date.toDateString();
-            const total = getDayTotal(dayIndex);
-            
-            return (
-                <div key={dayIndex} className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
-                    {/* Day Header */}
-                    <div className={`px-4 py-2 border-b border-gray-200 flex justify-between items-center ${isToday ? 'bg-indigo-50' : 'bg-blue-50/50'}`}>
-                        <div className="flex items-center gap-2">
-                             <span className="font-bold text-gray-800 text-sm w-8">{WEEK_DAYS[dayIndex]}</span>
-                             <span className="text-sm text-gray-600 font-medium">{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+      {/* --- GRID VIEW --- */}
+      {viewMode === 'grid' && (
+        <div className="flex-1 overflow-auto bg-gray-50 p-4">
+            <div className="bg-white border border-gray-200 rounded-lg shadow-sm min-w-[800px]">
+                <table className="w-full text-left">
+                    <thead>
+                        <tr className="bg-gray-50 text-xs text-gray-500 uppercase font-bold border-b border-gray-200">
+                            <th className="p-3 w-64 border-r border-gray-100">Project / Task</th>
+                            <th className="p-3 w-24">Billing</th>
+                            {WEEK_DAYS.map((day, i) => (
+                                <th key={day} className={`p-3 text-center ${i % 2 === 0 ? 'bg-gray-50' : 'bg-gray-50/50'}`}>
+                                    <div className="flex flex-col">
+                                        <span>{day}</span>
+                                        <span className="text-[10px] font-normal text-gray-400">
+                                            {weekDates[i].getDate()}
+                                        </span>
+                                    </div>
+                                </th>
+                            ))}
+                            <th className="p-3 text-center font-extrabold w-16">Total</th>
+                            <th className="p-3 w-10"></th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                        {entries.map((entry) => (
+                            <tr key={entry.id} className="hover:bg-gray-50 group">
+                                <td className="p-2 border-r border-gray-100 align-top">
+                                    <div className="space-y-2">
+                                        <select
+                                            disabled={isReadOnly}
+                                            value={entry.projectId}
+                                            onChange={(e) => updateEntry(entry.id, 'projectId', e.target.value)}
+                                            className="w-full text-xs font-bold text-gray-800 bg-transparent border-none p-0 focus:ring-0 cursor-pointer truncate"
+                                        >
+                                            <option value="" disabled>Select Project</option>
+                                            {projects.map(p => (
+                                                <option key={p.id} value={p.id}>{p.clientName} - {p.name}</option>
+                                            ))}
+                                        </select>
+                                        <select 
+                                            disabled={isReadOnly}
+                                            value={entry.taskId}
+                                            onChange={(e) => updateEntry(entry.id, 'taskId', e.target.value)}
+                                            className="w-full text-xs text-gray-500 bg-transparent border-b border-gray-200 pb-1 focus:ring-0 focus:border-indigo-500 cursor-pointer truncate"
+                                        >
+                                            <option value="" disabled>Select Task</option>
+                                            {tasks.filter(t => t.projectId === entry.projectId && isTaskAccessible(t)).map(t => (
+                                                <option key={t.id} value={t.id}>{t.name}</option>
+                                            ))}
+                                            {entry.taskId && !isTaskAccessible(tasks.find(t=>t.id === entry.taskId)!) && (
+                                                <option value={entry.taskId}>{tasks.find(t=>t.id === entry.taskId)?.name || 'Unknown'}</option>
+                                            )}
+                                        </select>
+                                        <input 
+                                            disabled={isReadOnly}
+                                            type="text"
+                                            placeholder="Comments..."
+                                            value={entry.notes}
+                                            onChange={(e) => updateEntry(entry.id, 'notes', e.target.value)}
+                                            className="w-full text-[10px] text-gray-400 bg-transparent border-none p-0 focus:ring-0 placeholder-gray-300"
+                                        />
+                                    </div>
+                                </td>
+                                <td className="p-2 align-top">
+                                     <select 
+                                        disabled={isReadOnly}
+                                        value={entry.billingStatus}
+                                        onChange={(e) => updateEntry(entry.id, 'billingStatus', e.target.value)}
+                                        className="w-full text-[10px] border border-gray-200 rounded p-1 text-gray-500"
+                                    >
+                                        <option value="Billable">Bill</option>
+                                        <option value="Non Billable">No Bill</option>
+                                    </select>
+                                </td>
+                                {entry.hours.map((h, i) => (
+                                    <td key={i} className={`p-2 align-top text-center ${i % 2 === 0 ? '' : 'bg-gray-50/30'}`}>
+                                        <input
+                                            disabled={isReadOnly}
+                                            type="number"
+                                            min="0"
+                                            max="24"
+                                            step="0.25"
+                                            value={h || ''}
+                                            onChange={(e) => updateHoursDirectly(entry.id, i, e.target.value)}
+                                            className={`w-12 text-center text-sm border-gray-200 rounded shadow-sm focus:border-indigo-500 focus:ring-indigo-500 ${
+                                                h > 0 ? 'font-bold text-gray-900 bg-white' : 'text-gray-400 bg-gray-50'
+                                            }`}
+                                        />
+                                    </td>
+                                ))}
+                                <td className="p-2 text-center align-top font-bold text-gray-800">
+                                    {entry.hours.reduce((a,b) => a+b, 0).toFixed(2)}
+                                </td>
+                                <td className="p-2 text-center align-middle">
+                                    {!isReadOnly && (
+                                        <button 
+                                            onClick={() => handleDeleteEntry(entry.id)}
+                                            className="text-gray-300 hover:text-red-500 transition-colors"
+                                        >
+                                            <MinusCircle className="w-5 h-5" />
+                                        </button>
+                                    )}
+                                </td>
+                            </tr>
+                        ))}
+                        {!isReadOnly && (
+                            <tr>
+                                <td colSpan={11} className="p-3 bg-gray-50 border-t border-gray-200">
+                                    <button 
+                                        onClick={handleAddRow}
+                                        className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                                    >
+                                        <Plus className="w-4 h-4" /> ADD ROW
+                                    </button>
+                                </td>
+                            </tr>
+                        )}
+                    </tbody>
+                    <tfoot className="bg-gray-50 border-t border-gray-200 font-bold text-xs text-gray-700">
+                        <tr>
+                            <td className="p-3 text-right" colSpan={2}>DAILY TOTALS</td>
+                            {Array.from({length: 7}).map((_, i) => (
+                                <td key={i} className="p-3 text-center">
+                                    {getDayTotal(i).toFixed(2)}
+                                </td>
+                            ))}
+                            <td className="p-3 text-center text-indigo-700 text-sm">
+                                {calculateTotal().toFixed(2)}
+                            </td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+      )}
+
+      {/* --- DETAIL VIEW (Original Day List) --- */}
+      {viewMode === 'detail' && (
+        <div className="flex-1 overflow-y-auto bg-gray-100 p-4 space-y-4">
+            {weekDates.map((date, dayIndex) => {
+                const dayEntries = getEntriesForDay(dayIndex);
+                const isToday = new Date().toDateString() === date.toDateString();
+                const total = getDayTotal(dayIndex);
+                
+                return (
+                    <div key={dayIndex} className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                        {/* Day Header */}
+                        <div className={`px-4 py-2 border-b border-gray-200 flex justify-between items-center ${isToday ? 'bg-indigo-50' : 'bg-blue-50/50'}`}>
+                            <div className="flex items-center gap-2">
+                                <span className="font-bold text-gray-800 text-sm w-8">{WEEK_DAYS[dayIndex]}</span>
+                                <span className="text-sm text-gray-600 font-medium">{date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                            </div>
+                            <div className="font-bold text-gray-800 text-sm">
+                                {total > 0 ? `${total.toFixed(2)}` : ''}
+                            </div>
                         </div>
-                        <div className="font-bold text-gray-800 text-sm">
-                             {total > 0 ? `${total.toFixed(2)}` : ''}
-                        </div>
-                    </div>
 
-                    {/* Entries List */}
-                    <div className="divide-y divide-gray-100">
-                        {dayEntries.map((entry) => {
-                            const isBreak = entry.notes === 'Break' || tasks.find(t => t.id === entry.taskId)?.name === 'Meal';
-                            const startTime = entry.dailyTimes[dayIndex].start;
-                            const endTime = entry.dailyTimes[dayIndex].end;
-                            
-                            return (
-                                <div key={entry.id + dayIndex} className="p-3 md:p-4 hover:bg-gray-50 transition-colors group">
-                                    <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
-                                        
-                                        {/* Styled Time Component - Clean Capsule Look */}
-                                        <div className="flex items-center gap-3 min-w-[240px]">
-                                            <div className="flex items-center bg-gray-900 border border-gray-700 rounded-md shadow-sm overflow-hidden w-48">
-                                                {/* Start Time */}
-                                                <div className="px-2 py-1.5 bg-gray-800 border-r border-gray-700 flex-1 relative">
-                                                    <input 
-                                                        disabled={isReadOnly}
-                                                        type="time" 
-                                                        value={startTime} 
-                                                        onChange={(e) => updateTime(entry.id, dayIndex, 'start', e.target.value)}
-                                                        className="bg-transparent text-white text-xs font-mono focus:outline-none w-full text-center appearance-none"
-                                                        style={{ colorScheme: 'dark' }}
-                                                    />
-                                                </div>
-
-                                                {/* Separator */}
-                                                <div className="bg-gray-900 px-2 text-gray-500 text-xs font-bold">-</div>
-
-                                                {/* End Time */}
-                                                <div className="px-2 py-1.5 bg-gray-800 border-l border-gray-700 flex-1 relative">
-                                                    <input 
-                                                        disabled={isReadOnly}
-                                                        type="time" 
-                                                        value={endTime} 
-                                                        onChange={(e) => updateTime(entry.id, dayIndex, 'end', e.target.value)}
-                                                        className="bg-transparent text-white text-xs font-mono focus:outline-none w-full text-center appearance-none"
-                                                        style={{ colorScheme: 'dark' }}
-                                                    />
-                                                </div>
-                                            </div>
-
-                                            <span className="text-sm font-bold text-gray-800 w-10 text-right font-mono">
-                                                {entry.hours[dayIndex].toFixed(2)}
-                                            </span>
-                                        </div>
-
-                                        {/* Task & Project Details OR Break Label */}
-                                        <div className="flex-1 w-full">
-                                            {isBreak ? (
-                                                <div className="flex items-center gap-2 py-1.5 px-3 bg-orange-50 text-orange-800 rounded-md border border-orange-200 w-fit shadow-sm">
-                                                    <Coffee className="w-4 h-4" />
-                                                    <span className="text-sm font-semibold">Break / Meal</span>
-                                                </div>
-                                            ) : (
-                                                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 w-full">
-                                                    {/* Task Selector */}
-                                                    <div className="md:col-span-3">
-                                                        <label className="text-[10px] text-gray-400 font-bold uppercase block md:hidden mb-1">Activity</label>
-                                                        <select 
-                                                            disabled={isReadOnly}
-                                                            value={entry.taskId}
-                                                            onChange={(e) => updateEntry(entry.id, 'taskId', e.target.value)}
-                                                            className="w-full text-sm border-none bg-transparent font-medium text-gray-800 focus:ring-0 cursor-pointer hover:bg-gray-100 rounded px-2 py-1 -ml-2 truncate"
-                                                        >
-                                                            {/* Filter tasks based on assignment */}
-                                                            {tasks.filter(t => t.projectId === entry.projectId && isTaskAccessible(t)).map(t => (
-                                                                <option key={t.id} value={t.id}>{t.name}</option>
-                                                            ))}
-                                                            {/* Keep the selected task visible even if user loses access, to prevent UI glitches */}
-                                                            {entry.taskId && !isTaskAccessible(tasks.find(t=>t.id === entry.taskId)!) && (
-                                                                <option value={entry.taskId}>{tasks.find(t=>t.id === entry.taskId)?.name || 'Unknown'}</option>
-                                                            )}
-                                                            <option value="" disabled>Select Activity</option>
-                                                        </select>
-                                                    </div>
-
-                                                    {/* Project Selector */}
-                                                    <div className="md:col-span-4">
-                                                        <label className="text-[10px] text-gray-400 font-bold uppercase block md:hidden mb-1">Project</label>
-                                                        <div className="flex flex-col">
-                                                            <select
-                                                                disabled={isReadOnly}
-                                                                value={entry.projectId}
-                                                                onChange={(e) => updateEntry(entry.id, 'projectId', e.target.value)}
-                                                                className="text-xs text-gray-500 border-none bg-transparent focus:ring-0 p-0 cursor-pointer hover:text-indigo-600 truncate"
-                                                            >
-                                                                {projects.map(p => (
-                                                                    <option key={p.id} value={p.id}>{p.clientName} - {p.name}</option>
-                                                                ))}
-                                                            </select>
-                                                            <div className="text-sm font-semibold text-gray-800 truncate">
-                                                                {projects.find(p => p.id === entry.projectId)?.name || 'Select Project'}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-
-                                                    {/* Billing Status */}
-                                                    <div className="md:col-span-2">
-                                                        <label className="text-[10px] text-gray-400 font-bold uppercase block md:hidden mb-1">Billing</label>
-                                                        <select 
-                                                            disabled={isReadOnly}
-                                                            value={entry.billingStatus || 'Billable'}
-                                                            onChange={(e) => updateEntry(entry.id, 'billingStatus', e.target.value)}
-                                                            className="w-full text-xs border border-gray-200 rounded px-2 py-1 text-gray-600 bg-white hover:border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                                                        >
-                                                            <option value="Billable">Billable</option>
-                                                            <option value="Non Billable">Non Billable</option>
-                                                        </select>
-                                                    </div>
-
-                                                    {/* Notes */}
-                                                    <div className="md:col-span-3">
-                                                        <label className="text-[10px] text-gray-400 font-bold uppercase block md:hidden mb-1">Comments</label>
+                        {/* Entries List */}
+                        <div className="divide-y divide-gray-100">
+                            {dayEntries.map((entry) => {
+                                const isBreak = entry.notes === 'Break' || tasks.find(t => t.id === entry.taskId)?.name === 'Meal';
+                                const startTime = entry.dailyTimes[dayIndex].start;
+                                const endTime = entry.dailyTimes[dayIndex].end;
+                                
+                                return (
+                                    <div key={entry.id + dayIndex} className="p-3 md:p-4 hover:bg-gray-50 transition-colors group">
+                                        <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
+                                            
+                                            {/* Styled Time Component - Clean Capsule Look */}
+                                            <div className="flex items-center gap-3 min-w-[240px]">
+                                                <div className="flex items-center bg-gray-900 border border-gray-700 rounded-md shadow-sm overflow-hidden w-48">
+                                                    {/* Start Time */}
+                                                    <div className="px-2 py-1.5 bg-gray-800 border-r border-gray-700 flex-1 relative">
                                                         <input 
                                                             disabled={isReadOnly}
-                                                            type="text" 
-                                                            placeholder="Enter comments..."
-                                                            value={entry.notes}
-                                                            onChange={(e) => updateEntry(entry.id, 'notes', e.target.value)}
-                                                            className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                                            type="time" 
+                                                            value={startTime} 
+                                                            onChange={(e) => updateTime(entry.id, dayIndex, 'start', e.target.value)}
+                                                            className="bg-transparent text-white text-xs font-mono focus:outline-none w-full text-center appearance-none"
+                                                            style={{ colorScheme: 'dark' }}
+                                                        />
+                                                    </div>
+
+                                                    {/* Separator */}
+                                                    <div className="bg-gray-900 px-2 text-gray-500 text-xs font-bold">-</div>
+
+                                                    {/* End Time */}
+                                                    <div className="px-2 py-1.5 bg-gray-800 border-l border-gray-700 flex-1 relative">
+                                                        <input 
+                                                            disabled={isReadOnly}
+                                                            type="time" 
+                                                            value={endTime} 
+                                                            onChange={(e) => updateTime(entry.id, dayIndex, 'end', e.target.value)}
+                                                            className="bg-transparent text-white text-xs font-mono focus:outline-none w-full text-center appearance-none"
+                                                            style={{ colorScheme: 'dark' }}
                                                         />
                                                     </div>
                                                 </div>
+
+                                                <span className="text-sm font-bold text-gray-800 w-10 text-right font-mono">
+                                                    {entry.hours[dayIndex].toFixed(2)}
+                                                </span>
+                                            </div>
+
+                                            {/* Task & Project Details OR Break Label */}
+                                            <div className="flex-1 w-full">
+                                                {isBreak ? (
+                                                    <div className="flex items-center gap-2 py-1.5 px-3 bg-orange-50 text-orange-800 rounded-md border border-orange-200 w-fit shadow-sm">
+                                                        <Coffee className="w-4 h-4" />
+                                                        <span className="text-sm font-semibold">Break / Meal</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="grid grid-cols-1 md:grid-cols-12 gap-3 w-full">
+                                                        {/* Task Selector */}
+                                                        <div className="md:col-span-3">
+                                                            <select 
+                                                                disabled={isReadOnly}
+                                                                value={entry.taskId}
+                                                                onChange={(e) => updateEntry(entry.id, 'taskId', e.target.value)}
+                                                                className="w-full text-sm border-none bg-transparent font-medium text-gray-800 focus:ring-0 cursor-pointer hover:bg-gray-100 rounded px-2 py-1 -ml-2 truncate"
+                                                            >
+                                                                {tasks.filter(t => t.projectId === entry.projectId && isTaskAccessible(t)).map(t => (
+                                                                    <option key={t.id} value={t.id}>{t.name}</option>
+                                                                ))}
+                                                                {entry.taskId && !isTaskAccessible(tasks.find(t=>t.id === entry.taskId)!) && (
+                                                                    <option value={entry.taskId}>{tasks.find(t=>t.id === entry.taskId)?.name || 'Unknown'}</option>
+                                                                )}
+                                                                <option value="" disabled>Select Activity</option>
+                                                            </select>
+                                                        </div>
+
+                                                        {/* Project Selector */}
+                                                        <div className="md:col-span-4">
+                                                            <div className="flex flex-col">
+                                                                <select
+                                                                    disabled={isReadOnly}
+                                                                    value={entry.projectId}
+                                                                    onChange={(e) => updateEntry(entry.id, 'projectId', e.target.value)}
+                                                                    className="text-xs text-gray-500 border-none bg-transparent focus:ring-0 p-0 cursor-pointer hover:text-indigo-600 truncate"
+                                                                >
+                                                                    {projects.map(p => (
+                                                                        <option key={p.id} value={p.id}>{p.clientName} - {p.name}</option>
+                                                                    ))}
+                                                                </select>
+                                                                <div className="text-sm font-semibold text-gray-800 truncate">
+                                                                    {projects.find(p => p.id === entry.projectId)?.name || 'Select Project'}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Billing Status */}
+                                                        <div className="md:col-span-2">
+                                                            <select 
+                                                                disabled={isReadOnly}
+                                                                value={entry.billingStatus || 'Billable'}
+                                                                onChange={(e) => updateEntry(entry.id, 'billingStatus', e.target.value)}
+                                                                className="w-full text-xs border border-gray-200 rounded px-2 py-1 text-gray-600 bg-white hover:border-gray-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                                            >
+                                                                <option value="Billable">Billable</option>
+                                                                <option value="Non Billable">Non Billable</option>
+                                                            </select>
+                                                        </div>
+
+                                                        {/* Notes */}
+                                                        <div className="md:col-span-3">
+                                                            <input 
+                                                                disabled={isReadOnly}
+                                                                type="text" 
+                                                                placeholder="Enter comments..."
+                                                                value={entry.notes}
+                                                                onChange={(e) => updateEntry(entry.id, 'notes', e.target.value)}
+                                                                className="w-full text-xs border border-gray-300 rounded px-2 py-1.5 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Action Buttons */}
+                                            {!isReadOnly && (
+                                                <div className="flex items-center gap-2 pt-1 md:pt-0">
+                                                    {!isBreak && (
+                                                        <button 
+                                                            onClick={() => updateEntry(entry.id, 'starred', !entry.starred)}
+                                                            className={`${entry.starred ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'}`}
+                                                            title={entry.starred ? "Unstar" : "Star this entry"}
+                                                        >
+                                                            <Star className={`w-4 h-4 ${entry.starred ? 'fill-yellow-500' : ''}`} />
+                                                        </button>
+                                                    )}
+                                                    <button 
+                                                        onClick={() => handleDeleteEntryDay(entry.id, dayIndex)}
+                                                        className="text-gray-400 hover:text-red-500"
+                                                        title="Remove entry"
+                                                    >
+                                                        <MinusCircle className="w-5 h-5" />
+                                                    </button>
+                                                </div>
                                             )}
                                         </div>
-
-                                        {/* Action Buttons */}
-                                        {!isReadOnly && (
-                                            <div className="flex items-center gap-2 pt-1 md:pt-0">
-                                                {!isBreak && (
-                                                    <button 
-                                                        onClick={() => updateEntry(entry.id, 'starred', !entry.starred)}
-                                                        className={`${entry.starred ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'}`}
-                                                        title={entry.starred ? "Unstar" : "Star this entry"}
-                                                    >
-                                                        <Star className={`w-4 h-4 ${entry.starred ? 'fill-yellow-500' : ''}`} />
-                                                    </button>
-                                                )}
-                                                <button 
-                                                    onClick={() => handleDeleteEntryDay(entry.id, dayIndex)}
-                                                    className="text-gray-400 hover:text-red-500"
-                                                    title="Remove entry"
-                                                >
-                                                    <MinusCircle className="w-5 h-5" />
-                                                </button>
-                                            </div>
-                                        )}
                                     </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-
-                    {/* Footer Actions */}
-                    {!isReadOnly && (
-                        <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex gap-4">
-                            <button 
-                                onClick={() => handleAddEntryForDay(dayIndex, 'work')}
-                                className="text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 uppercase tracking-wide"
-                            >
-                                <Plus className="w-3 h-3" /> Work Time
-                            </button>
-                            <button 
-                                onClick={() => handleAddEntryForDay(dayIndex, 'break')}
-                                className="text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 uppercase tracking-wide"
-                            >
-                                <Plus className="w-3 h-3" /> Break Time
-                            </button>
+                                );
+                            })}
                         </div>
-                    )}
-                </div>
-            );
-        })}
-        
-        {/* Weekly Total Footer */}
-        <div className="flex justify-end p-4 bg-white border border-gray-200 rounded-lg shadow-sm">
-             <div className="text-right">
-                 <span className="text-sm text-gray-500 uppercase font-bold mr-4">Weekly Total</span>
-                 <span className="text-2xl font-bold text-indigo-600">{calculateTotal().toFixed(2)}</span>
-             </div>
+
+                        {/* Footer Actions */}
+                        {!isReadOnly && (
+                            <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex gap-4">
+                                <button 
+                                    onClick={() => handleAddEntryForDay(dayIndex, 'work')}
+                                    className="text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 uppercase tracking-wide"
+                                >
+                                    <Plus className="w-3 h-3" /> Work Time
+                                </button>
+                                <button 
+                                    onClick={() => handleAddEntryForDay(dayIndex, 'break')}
+                                    className="text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 uppercase tracking-wide"
+                                >
+                                    <Plus className="w-3 h-3" /> Break Time
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
         </div>
-      </div>
+      )}
     </div>
   );
 };

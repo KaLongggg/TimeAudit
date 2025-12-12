@@ -49,17 +49,31 @@ export const storageService = {
         if (timesheetsRes.error) throw timesheetsRes.error;
         // timeOffRes.error might happen if table doesn't exist yet, handle gracefully
 
-        const projectData = projectsRes.data as Project[];
+        // MAP DB (snake_case) -> APP (camelCase)
+        
+        const projectData = (projectsRes.data || []).map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            clientName: p.client_name || p.clientName,
+            color: p.color
+        })) as Project[];
+
         const taskData = (tasksRes.data || []).map((t: any) => ({
             id: t.id,
             name: t.name,
-            projectId: t.project_id || t.projectId, // Handle both snake_case (DB) and camelCase (legacy)
-            assignedUserIds: t.assigned_user_ids || t.assignedUserIds // Handle mapping
+            projectId: t.project_id || t.projectId, 
+            assignedUserIds: t.assigned_user_ids || t.assignedUserIds
         })) as Task[];
         
-        const timesheetData = timesheetsRes.data as Timesheet[];
+        const timesheetData = (timesheetsRes.data || []).map((t: any) => ({
+            id: t.id,
+            userId: t.user_id || t.userId,
+            weekStartDate: t.week_start_date || t.weekStartDate,
+            status: t.status,
+            entries: t.entries,
+            totalHours: t.total_hours || t.totalHours
+        })) as Timesheet[];
         
-        // Map users
         const userData = (usersRes.data || []).map((u: any) => ({
             id: u.id,
             name: u.name,
@@ -69,7 +83,6 @@ export const storageService = {
             managerId: u.manager_id // Map DB column
         })) as User[];
         
-        // Map snake_case DB columns to camelCase types if necessary
         const timeOffData = (timeOffRes.data || []).map((row: any) => ({
            id: row.id,
            userId: row.user_id,
@@ -102,7 +115,7 @@ export const storageService = {
       projects: loadFromLS<Project[]>(LS_KEYS.PROJECTS, MOCK_PROJECTS),
       tasks: loadFromLS<Task[]>(LS_KEYS.TASKS, MOCK_TASKS),
       timesheets: loadFromLS<Timesheet[]>(LS_KEYS.TIMESHEETS, MOCK_TIMESHEETS),
-      users: MOCK_USERS, // Local mock users usually read-only in this demo context, but can be extended
+      users: MOCK_USERS, 
       timeOffRequests: loadFromLS<TimeOffRequest[]>(LS_KEYS.TIMEOFF, [])
     };
   },
@@ -116,7 +129,12 @@ export const storageService = {
     saveToLS(LS_KEYS.PROJECTS, updated);
 
     if (storageService.isCloudEnabled()) {
-      await supabase.from('projects').upsert(project);
+      await supabase.from('projects').upsert({
+          id: project.id,
+          name: project.name,
+          client_name: project.clientName,
+          color: project.color
+      });
     }
   },
 
@@ -138,7 +156,6 @@ export const storageService = {
     saveToLS(LS_KEYS.TASKS, updated);
 
     if (storageService.isCloudEnabled()) {
-      // Map to DB columns
       await supabase.from('tasks').upsert({
           id: task.id,
           name: task.name,
@@ -157,9 +174,8 @@ export const storageService = {
     }
   },
 
-  // --- USERS (New) ---
+  // --- USERS ---
   saveUser: async (user: User) => {
-     // Only really relevant for Supabase or advanced local storage usage
      if (storageService.isCloudEnabled()) {
          await supabase.from('users').upsert({
              id: user.id,
@@ -169,9 +185,6 @@ export const storageService = {
              avatar: user.avatar,
              manager_id: user.managerId
          });
-     } else {
-         console.log("Saving user locally (mock)", user);
-         // In a real local-only app, we'd persist this to LS_KEYS.USERS
      }
   },
 
@@ -184,7 +197,14 @@ export const storageService = {
     saveToLS(LS_KEYS.TIMESHEETS, updated);
 
     if (storageService.isCloudEnabled()) {
-      await supabase.from('timesheets').upsert(timesheet);
+      await supabase.from('timesheets').upsert({
+          id: timesheet.id,
+          user_id: timesheet.userId,
+          week_start_date: timesheet.weekStartDate,
+          status: timesheet.status,
+          entries: timesheet.entries,
+          total_hours: timesheet.totalHours
+      });
     }
   },
 
