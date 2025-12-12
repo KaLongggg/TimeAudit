@@ -50,9 +50,24 @@ export const storageService = {
         // timeOffRes.error might happen if table doesn't exist yet, handle gracefully
 
         const projectData = projectsRes.data as Project[];
-        const taskData = tasksRes.data as Task[];
+        const taskData = (tasksRes.data || []).map((t: any) => ({
+            id: t.id,
+            name: t.name,
+            projectId: t.project_id || t.projectId, // Handle both snake_case (DB) and camelCase (legacy)
+            assignedUserIds: t.assigned_user_ids || t.assignedUserIds // Handle mapping
+        })) as Task[];
+        
         const timesheetData = timesheetsRes.data as Timesheet[];
-        const userData = usersRes.data as unknown as User[];
+        
+        // Map users
+        const userData = (usersRes.data || []).map((u: any) => ({
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            role: u.role,
+            avatar: u.avatar,
+            managerId: u.manager_id // Map DB column
+        })) as User[];
         
         // Map snake_case DB columns to camelCase types if necessary
         const timeOffData = (timeOffRes.data || []).map((row: any) => ({
@@ -64,7 +79,9 @@ export const storageService = {
            endTime: row.end_time,
            type: row.type,
            reason: row.reason,
-           status: row.status
+           status: row.status,
+           attachment: row.attachment,
+           attachmentName: row.attachment_name
         })) as TimeOffRequest[];
 
         return {
@@ -85,7 +102,7 @@ export const storageService = {
       projects: loadFromLS<Project[]>(LS_KEYS.PROJECTS, MOCK_PROJECTS),
       tasks: loadFromLS<Task[]>(LS_KEYS.TASKS, MOCK_TASKS),
       timesheets: loadFromLS<Timesheet[]>(LS_KEYS.TIMESHEETS, MOCK_TIMESHEETS),
-      users: MOCK_USERS,
+      users: MOCK_USERS, // Local mock users usually read-only in this demo context, but can be extended
       timeOffRequests: loadFromLS<TimeOffRequest[]>(LS_KEYS.TIMEOFF, [])
     };
   },
@@ -121,7 +138,13 @@ export const storageService = {
     saveToLS(LS_KEYS.TASKS, updated);
 
     if (storageService.isCloudEnabled()) {
-      await supabase.from('tasks').upsert(task);
+      // Map to DB columns
+      await supabase.from('tasks').upsert({
+          id: task.id,
+          name: task.name,
+          project_id: task.projectId,
+          assigned_user_ids: task.assignedUserIds
+      });
     }
   },
 
@@ -132,6 +155,24 @@ export const storageService = {
     if (storageService.isCloudEnabled()) {
       await supabase.from('tasks').delete().eq('id', taskId);
     }
+  },
+
+  // --- USERS (New) ---
+  saveUser: async (user: User) => {
+     // Only really relevant for Supabase or advanced local storage usage
+     if (storageService.isCloudEnabled()) {
+         await supabase.from('users').upsert({
+             id: user.id,
+             name: user.name,
+             email: user.email,
+             role: user.role,
+             avatar: user.avatar,
+             manager_id: user.managerId
+         });
+     } else {
+         console.log("Saving user locally (mock)", user);
+         // In a real local-only app, we'd persist this to LS_KEYS.USERS
+     }
   },
 
   // --- TIMESHEETS ---
@@ -167,7 +208,9 @@ export const storageService = {
             end_time: request.endTime,
             type: request.type,
             reason: request.reason,
-            status: request.status
+            status: request.status,
+            attachment: request.attachment,
+            attachment_name: request.attachmentName
         });
     }
   }

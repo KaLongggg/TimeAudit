@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { TimeOffRequest, TimeOffStatus } from '../types';
-import { ChevronLeft, ChevronRight, Plus, Calendar, X, Clock, AlertCircle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Calendar, X, Clock, AlertCircle, UploadCloud, FileText, Trash2, Paperclip } from 'lucide-react';
 
 interface TimeOffViewProps {
   userId: string;
@@ -14,6 +14,11 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<TimeOffRequest | null>(null);
   
+  // File Upload State
+  const [dragActive, setDragActive] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Form State
   const [formData, setFormData] = useState({
     startDate: '',
@@ -47,10 +52,88 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
     setCurrentDate(new Date(year, month + offset, 1));
   };
 
+  // --- Layout & Slotting Logic ---
+  const checkOverlap = (a: TimeOffRequest, b: TimeOffRequest) => {
+    return a.startDate <= b.endDate && a.endDate >= b.startDate;
+  };
+
+  const layoutMap = useMemo(() => {
+    // 1. Sort by start date, then duration (longer first for better packing)
+    const sorted = [...requests].sort((a, b) => {
+        if (a.startDate !== b.startDate) return a.startDate.localeCompare(b.startDate);
+        const durA = new Date(a.endDate).getTime() - new Date(a.startDate).getTime();
+        const durB = new Date(b.endDate).getTime() - new Date(b.startDate).getTime();
+        return durB - durA; // Descending duration
+    });
+
+    const slots = new Map<string, number>();
+    const occupied: { req: TimeOffRequest, slot: number }[] = [];
+
+    sorted.forEach(req => {
+        let slot = 0;
+        while (true) {
+            // Check if this slot is taken by an overlapping request
+            const isTaken = occupied.some(occ => occ.slot === slot && checkOverlap(occ.req, req));
+            if (!isTaken) break;
+            slot++;
+        }
+        occupied.push({ req, slot });
+        slots.set(req.id, slot);
+    });
+
+    return slots;
+  }, [requests]);
+
+
+  // --- File Handling ---
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      setSelectedFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setSelectedFile(e.target.files[0]);
+    }
+  };
+
+  const convertFileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = error => reject(error);
+    });
+  };
+
   // --- Request Handling ---
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.startDate || !formData.endDate) return;
+
+    let attachmentStr = undefined;
+    if (selectedFile) {
+        try {
+            attachmentStr = await convertFileToBase64(selectedFile);
+        } catch (err) {
+            alert("Failed to process file attachment.");
+            return;
+        }
+    }
 
     const newRequest: TimeOffRequest = {
       id: crypto.randomUUID ? crypto.randomUUID() : `tr-${Date.now()}`,
@@ -61,12 +144,15 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
       endTime: formData.endTime,
       type: formData.type as any,
       reason: formData.reason,
-      status: TimeOffStatus.PENDING
+      status: TimeOffStatus.PENDING,
+      attachment: attachmentStr,
+      attachmentName: selectedFile?.name
     };
 
     onCreate(newRequest);
     setIsModalOpen(false);
     setFormData({ startDate: '', endDate: '', startTime: '09:00', endTime: '17:00', type: 'Annual Leave', reason: '' });
+    setSelectedFile(null);
   };
 
   const getRequestsForDate = (day: number) => {
@@ -88,11 +174,6 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
     const isSick = req.type === 'Sick Leave';
 
     let baseClasses = "h-6 mb-1 text-[10px] flex items-center px-2 cursor-pointer transition-all relative z-10 hover:brightness-95 overflow-hidden whitespace-nowrap ";
-    
-    // Spanning Logic: 
-    // Start date gets left radius and margin
-    // End date gets right radius and margin
-    // Middle dates get no radius and negative margins to overlap visually
     
     if (isStart) baseClasses += "rounded-l-md ml-1 ";
     else baseClasses += "ml-[-1px] border-l-0 "; // Connect to previous
@@ -153,11 +234,19 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
         {/* Grid */}
         <div className="grid grid-cols-7 gap-0 border-collapse">
             {calendarCells.map((day, index) => {
-                // Ensure we have at least 5 rows logic if needed, but flex wrap is standard
-                // We use borders on cells for the grid lines
                 const reqs = day ? getRequestsForDate(day) : [];
                 const currentStr = day ? `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}` : '';
                 const isToday = day && new Date().toDateString() === new Date(year, month, day).toDateString();
+
+                // Build Slots for Rendering
+                const daySlots: (TimeOffRequest | null)[] = [];
+                if (reqs.length > 0) {
+                    // Find max slot index for this day
+                    const maxSlot = Math.max(...reqs.map(r => layoutMap.get(r.id) ?? 0));
+                    for (let i = 0; i <= maxSlot; i++) {
+                        daySlots[i] = reqs.find(r => layoutMap.get(r.id) === i) || null;
+                    }
+                }
 
                 return (
                     <div 
@@ -176,7 +265,12 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
                                     </span>
                                 </div>
                                 <div className="flex flex-col mt-1 relative">
-                                    {reqs.map(req => {
+                                    {daySlots.map((req, slotIdx) => {
+                                        if (!req) {
+                                            // Render placeholder for empty slot to maintain alignment
+                                            return <div key={`empty-${slotIdx}`} className="h-6 mb-1"></div>;
+                                        }
+
                                         const isStart = req.startDate === currentStr;
                                         return (
                                             <div 
@@ -185,13 +279,13 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
                                                 className={getBarStyle(req, day)}
                                                 title={`${req.type}: ${req.reason || 'No reason'}`}
                                             >
-                                                {/* Only show text on start date or if it's the beginning of the week row (simplified to start date for now) */}
                                                 {isStart && (
-                                                    <span className="font-bold truncate pl-1">
+                                                    <span className="font-bold truncate pl-1 flex items-center gap-1">
                                                         {req.type === 'Annual Leave' ? 'Annual Leave' : req.type}
+                                                        {req.attachment && <Paperclip className="w-2 h-2 text-gray-600" />}
                                                     </span>
                                                 )}
-                                                {!isStart && <span className="opacity-0">.</span>} {/* Spacer */}
+                                                {!isStart && <span className="opacity-0">.</span>}
                                             </div>
                                         );
                                     })}
@@ -223,86 +317,135 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
       {/* Create Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95">
-                <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">
+                <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
                     <h3 className="font-bold text-gray-800">Request Time Off</h3>
                     <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
-                <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Start Date</label>
-                            <input 
-                                type="date" 
-                                required
-                                className="w-full p-2 text-sm border border-gray-300 rounded-lg"
-                                value={formData.startDate}
-                                onChange={e => setFormData({...formData, startDate: e.target.value})}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">End Date</label>
-                            <input 
-                                type="date" 
-                                required
-                                className="w-full p-2 text-sm border border-gray-300 rounded-lg"
-                                value={formData.endDate}
-                                onChange={e => setFormData({...formData, endDate: e.target.value})}
-                            />
-                        </div>
-                    </div>
+                <div className="overflow-y-auto p-6">
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                          <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Start Date</label>
+                              <input 
+                                  type="date" 
+                                  required
+                                  style={{ colorScheme: 'dark' }}
+                                  className="w-full p-2 text-sm border border-gray-600 rounded-lg bg-gray-800 text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                  value={formData.startDate}
+                                  onChange={e => setFormData({...formData, startDate: e.target.value})}
+                              />
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">End Date</label>
+                              <input 
+                                  type="date" 
+                                  required
+                                  style={{ colorScheme: 'dark' }}
+                                  className="w-full p-2 text-sm border border-gray-600 rounded-lg bg-gray-800 text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                  value={formData.endDate}
+                                  onChange={e => setFormData({...formData, endDate: e.target.value})}
+                              />
+                          </div>
+                      </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                         <div>
-                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Start Time</label>
-                            <input 
-                                type="time" 
-                                className="w-full p-2 text-sm border border-gray-300 rounded-lg"
-                                value={formData.startTime}
-                                onChange={e => setFormData({...formData, startTime: e.target.value})}
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">End Time</label>
-                            <input 
-                                type="time" 
-                                className="w-full p-2 text-sm border border-gray-300 rounded-lg"
-                                value={formData.endTime}
-                                onChange={e => setFormData({...formData, endTime: e.target.value})}
-                            />
-                        </div>
-                    </div>
+                      <div className="grid grid-cols-2 gap-4">
+                          <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Start Time</label>
+                              <input 
+                                  type="time" 
+                                  style={{ colorScheme: 'dark' }}
+                                  className="w-full p-2 text-sm border border-gray-600 rounded-lg bg-gray-800 text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                  value={formData.startTime}
+                                  onChange={e => setFormData({...formData, startTime: e.target.value})}
+                              />
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">End Time</label>
+                              <input 
+                                  type="time" 
+                                  style={{ colorScheme: 'dark' }}
+                                  className="w-full p-2 text-sm border border-gray-600 rounded-lg bg-gray-800 text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                  value={formData.endTime}
+                                  onChange={e => setFormData({...formData, endTime: e.target.value})}
+                              />
+                          </div>
+                      </div>
 
-                    <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Leave Type</label>
-                        <select 
-                            className="w-full p-2 text-sm border border-gray-300 rounded-lg bg-white"
-                            value={formData.type}
-                            onChange={e => setFormData({...formData, type: e.target.value})}
+                      <div>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Leave Type</label>
+                          <select 
+                              className="w-full p-2 text-sm border border-gray-300 rounded-lg bg-white text-gray-900"
+                              value={formData.type}
+                              onChange={e => setFormData({...formData, type: e.target.value})}
+                          >
+                              <option value="Annual Leave">Annual Leave</option>
+                              <option value="Sick Leave">Sick Leave</option>
+                              <option value="Other">Other</option>
+                          </select>
+                      </div>
+
+                      <div>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Reason</label>
+                          <textarea 
+                              rows={2}
+                              className="w-full p-2 text-sm border border-gray-600 rounded-lg bg-gray-800 text-white placeholder-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                              placeholder="Brief details..."
+                              value={formData.reason}
+                              onChange={e => setFormData({...formData, reason: e.target.value})}
+                          />
+                      </div>
+
+                      {/* Attachment Drag & Drop Zone */}
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Attachment (Medical Cert / Evidence)</label>
+                        <div 
+                          className={`border-2 border-dashed rounded-lg p-4 transition-all text-center cursor-pointer ${
+                            dragActive ? 'border-indigo-500 bg-indigo-50' : 'border-gray-300 bg-gray-50 hover:bg-gray-100'
+                          }`}
+                          onDragEnter={handleDrag}
+                          onDragLeave={handleDrag}
+                          onDragOver={handleDrag}
+                          onDrop={handleDrop}
+                          onClick={() => fileInputRef.current?.click()}
                         >
-                            <option value="Annual Leave">Annual Leave</option>
-                            <option value="Sick Leave">Sick Leave</option>
-                            <option value="Other">Other</option>
-                        </select>
-                    </div>
+                           <input 
+                              ref={fileInputRef}
+                              type="file" 
+                              className="hidden" 
+                              onChange={handleFileChange}
+                              accept="image/*,.pdf"
+                           />
+                           
+                           {selectedFile ? (
+                              <div className="flex items-center justify-center gap-2 text-indigo-700">
+                                <FileText className="w-5 h-5" />
+                                <span className="text-sm font-medium truncate max-w-[180px]">{selectedFile.name}</span>
+                                <button 
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setSelectedFile(null); }}
+                                  className="p-1 hover:bg-indigo-100 rounded-full text-indigo-400 hover:text-red-500"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                           ) : (
+                              <div className="flex flex-col items-center gap-1 text-gray-500">
+                                <UploadCloud className="w-6 h-6 mb-1 text-gray-400" />
+                                <span className="text-sm font-medium">Click to upload or drag & drop</span>
+                                <span className="text-xs text-gray-400">PDF, PNG, JPG up to 5MB</span>
+                              </div>
+                           )}
+                        </div>
+                      </div>
 
-                    <div>
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Reason</label>
-                        <textarea 
-                            rows={3}
-                            className="w-full p-2 text-sm border border-gray-300 rounded-lg"
-                            placeholder="Brief details..."
-                            value={formData.reason}
-                            onChange={e => setFormData({...formData, reason: e.target.value})}
-                        />
-                    </div>
-
-                    <button type="submit" className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium shadow-sm transition-colors mt-2">
-                        Submit Request
-                    </button>
-                </form>
+                      <button type="submit" className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium shadow-sm transition-colors mt-2">
+                          Submit Request
+                      </button>
+                  </form>
+                </div>
             </div>
         </div>
       )}
@@ -353,6 +496,22 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
                             {selectedRequest.reason || 'No reason provided.'}
                         </p>
                     </div>
+
+                    {selectedRequest.attachment && (
+                        <div>
+                           <p className="text-xs text-gray-500 uppercase font-bold mb-1">Attachment</p>
+                           <a 
+                             href={selectedRequest.attachment} 
+                             download={selectedRequest.attachmentName || 'evidence'}
+                             className="flex items-center gap-2 p-2 bg-indigo-50 border border-indigo-100 rounded-lg text-indigo-700 hover:bg-indigo-100 transition-colors group"
+                           >
+                              <Paperclip className="w-4 h-4" />
+                              <span className="text-sm font-medium underline decoration-indigo-300 group-hover:decoration-indigo-700">
+                                {selectedRequest.attachmentName || 'View Attachment'}
+                              </span>
+                           </a>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

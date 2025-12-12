@@ -1,6 +1,7 @@
+
 import React, { useState } from 'react';
-import { Timesheet, Project, TimesheetStatus, User, TimeOffRequest, TimeOffStatus } from '../types';
-import { CheckCircle, XCircle, Clock, Calendar, User as UserIcon } from 'lucide-react';
+import { Timesheet, Project, TimesheetStatus, User, TimeOffRequest, TimeOffStatus, Role } from '../types';
+import { CheckCircle, XCircle, Clock, Calendar, User as UserIcon, Paperclip, Users, Save } from 'lucide-react';
 import { DashboardStats } from './DashboardStats';
 import { storageService } from '../services/storage';
 
@@ -10,10 +11,11 @@ interface AdminViewProps {
   users: User[];
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
+  onUpdateUser: (user: User) => void; // Callback to update user data
 }
 
-export const AdminView: React.FC<AdminViewProps> = ({ timesheets, projects, users, onApprove, onReject }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'approvals' | 'timeoff'>('dashboard');
+export const AdminView: React.FC<AdminViewProps> = ({ timesheets, projects, users, onApprove, onReject, onUpdateUser }) => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'approvals' | 'timeoff' | 'team'>('dashboard');
   
   // Local state to track updates immediately
   const [localRequests, setLocalRequests] = useState<TimeOffRequest[]>([]);
@@ -39,19 +41,33 @@ export const AdminView: React.FC<AdminViewProps> = ({ timesheets, projects, user
       await storageService.saveTimeOffRequest(updated);
   };
 
+  const handleRoleChange = (userId: string, newRole: Role) => {
+      const user = users.find(u => u.id === userId);
+      if (user) {
+          onUpdateUser({ ...user, role: newRole });
+      }
+  };
+
+  const handleManagerChange = (userId: string, managerId: string) => {
+      const user = users.find(u => u.id === userId);
+      if (user) {
+          onUpdateUser({ ...user, managerId: managerId === 'none' ? undefined : managerId });
+      }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div className="flex gap-4 border-b border-gray-200">
+        <div className="flex gap-4 border-b border-gray-200 overflow-x-auto">
             <button 
                 onClick={() => setActiveTab('dashboard')}
-                className={`pb-2 px-1 text-sm font-medium transition-colors ${activeTab === 'dashboard' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`pb-2 px-1 text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'dashboard' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
             >
                 Dashboard
             </button>
             <button 
                 onClick={() => setActiveTab('approvals')}
-                className={`pb-2 px-1 text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'approvals' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`pb-2 px-1 text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'approvals' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
             >
                 Timesheet Approvals
                 {pendingTimesheets.length > 0 && (
@@ -60,12 +76,18 @@ export const AdminView: React.FC<AdminViewProps> = ({ timesheets, projects, user
             </button>
             <button 
                 onClick={() => setActiveTab('timeoff')}
-                className={`pb-2 px-1 text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === 'timeoff' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`pb-2 px-1 text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'timeoff' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
             >
                 Time Off Requests
                 {pendingTimeOff.length > 0 && (
                     <span className="bg-yellow-100 text-yellow-700 text-xs py-0.5 px-2 rounded-full">{pendingTimeOff.length}</span>
                 )}
+            </button>
+            <button 
+                onClick={() => setActiveTab('team')}
+                className={`pb-2 px-1 text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'team' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+                Team Management
             </button>
         </div>
       </div>
@@ -157,12 +179,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ timesheets, projects, user
                                   <div className="flex justify-between text-sm bg-gray-50 p-2 rounded border border-gray-100">
                                       <div>
                                           <p className="text-xs text-gray-400 uppercase font-bold">From</p>
-                                          <p className="font-medium">{req.startDate}</p>
+                                          <p className="font-medium text-gray-900">{req.startDate}</p>
                                           <p className="text-xs text-gray-500">{req.startTime || '09:00'}</p>
                                       </div>
                                       <div className="text-right">
                                           <p className="text-xs text-gray-400 uppercase font-bold">To</p>
-                                          <p className="font-medium">{req.endDate}</p>
+                                          <p className="font-medium text-gray-900">{req.endDate}</p>
                                           <p className="text-xs text-gray-500">{req.endTime || '17:00'}</p>
                                       </div>
                                   </div>
@@ -171,11 +193,86 @@ export const AdminView: React.FC<AdminViewProps> = ({ timesheets, projects, user
                                           "{req.reason}"
                                       </p>
                                   )}
+                                  {req.attachment && (
+                                     <a 
+                                        href={req.attachment} 
+                                        download={req.attachmentName || 'evidence'}
+                                        className="flex items-center gap-2 text-xs text-indigo-600 hover:text-indigo-800 hover:underline mt-1 pl-1"
+                                     >
+                                        <Paperclip className="w-3 h-3" />
+                                        View Attached Evidence
+                                     </a>
+                                  )}
                               </div>
                           </div>
                       ))}
                   </div>
               )}
+          </div>
+      )}
+
+      {activeTab === 'team' && (
+          <div className="animate-in fade-in duration-500 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+             <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
+                <Users className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-bold text-gray-800">Organization & Team Hierarchy</h3>
+             </div>
+             <div className="overflow-x-auto">
+                 <table className="w-full text-left text-sm">
+                     <thead>
+                         <tr className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-500">
+                             <th className="p-4">Employee</th>
+                             <th className="p-4">Role</th>
+                             <th className="p-4">Reports To (Manager)</th>
+                             <th className="p-4 text-right">Status</th>
+                         </tr>
+                     </thead>
+                     <tbody className="divide-y divide-gray-100">
+                         {users.map(user => (
+                             <tr key={user.id} className="hover:bg-gray-50 transition-colors">
+                                 <td className="p-4">
+                                     <div className="flex items-center gap-3">
+                                         <img src={user.avatar} className="w-9 h-9 rounded-full bg-gray-200" alt="" />
+                                         <div>
+                                             <div className="font-semibold text-gray-900">{user.name}</div>
+                                             <div className="text-xs text-gray-500">{user.email}</div>
+                                         </div>
+                                     </div>
+                                 </td>
+                                 <td className="p-4">
+                                     <select 
+                                        value={user.role} 
+                                        onChange={(e) => handleRoleChange(user.id, e.target.value as Role)}
+                                        className="border border-gray-200 rounded-md text-xs py-1 px-2 bg-white text-gray-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                     >
+                                         <option value={Role.EMPLOYEE}>Employee</option>
+                                         <option value={Role.ADMIN}>Admin</option>
+                                     </select>
+                                 </td>
+                                 <td className="p-4">
+                                     <select 
+                                        value={user.managerId || 'none'}
+                                        onChange={(e) => handleManagerChange(user.id, e.target.value)}
+                                        className="border border-gray-200 rounded-md text-xs py-1 px-2 bg-white text-gray-900 focus:ring-2 focus:ring-indigo-500 outline-none w-full max-w-[200px]"
+                                     >
+                                         <option value="none">-- No Manager --</option>
+                                         {users.filter(u => u.id !== user.id).map(possibleManager => (
+                                             <option key={possibleManager.id} value={possibleManager.id}>
+                                                 {possibleManager.name}
+                                             </option>
+                                         ))}
+                                     </select>
+                                 </td>
+                                 <td className="p-4 text-right">
+                                     <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                         Active
+                                     </span>
+                                 </td>
+                             </tr>
+                         ))}
+                     </tbody>
+                 </table>
+             </div>
           </div>
       )}
     </div>

@@ -65,12 +65,24 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
     return entries.reduce((acc, entry) => acc + entry.hours.reduce((a, b) => a + b, 0), 0);
   };
 
+  // Helper to check if a task is accessible by the current user
+  // We use timesheet.userId to check eligibility
+  const isTaskAccessible = (task: Task) => {
+      if (!task.assignedUserIds || task.assignedUserIds.length === 0) return true;
+      return task.assignedUserIds.includes(timesheet.userId);
+  };
+
   const handleAddEntryForDay = (dayIndex: number, type: 'work' | 'break' = 'work') => {
     // Create a new entry specifically for this day
     const defaultProject = projects[0]?.id || '';
+    
+    // Find a default task that is accessible
+    const availableTasks = tasks.filter(t => t.projectId === defaultProject && isTaskAccessible(t));
+    const breakTask = tasks.find(t => (t.name.toLowerCase().includes('meal') || t.name.toLowerCase().includes('break')) && isTaskAccessible(t));
+
     const defaultTask = type === 'break' 
-        ? (tasks.find(t => t.name.toLowerCase().includes('meal') || t.name.toLowerCase().includes('break'))?.id || '')
-        : (tasks.filter(t => t.projectId === defaultProject)[0]?.id || '');
+        ? (breakTask?.id || '')
+        : (availableTasks[0]?.id || '');
     
     const defaultBilling = type === 'break' ? 'Non Billable' : 'Billable';
 
@@ -116,7 +128,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
     setEntries(entries.map(e => {
       if (e.id === id) {
         if (field === 'projectId') {
-            const firstTask = tasks.find(t => t.projectId === value);
+            const firstTask = tasks.find(t => t.projectId === value && isTaskAccessible(t));
             return { ...e, [field]: value, taskId: firstTask?.id || '' };
         }
         return { ...e, [field]: value };
@@ -383,9 +395,14 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                                             onChange={(e) => updateEntry(entry.id, 'taskId', e.target.value)}
                                                             className="w-full text-sm border-none bg-transparent font-medium text-gray-800 focus:ring-0 cursor-pointer hover:bg-gray-100 rounded px-2 py-1 -ml-2 truncate"
                                                         >
-                                                            {tasks.filter(t => t.projectId === entry.projectId).map(t => (
+                                                            {/* Filter tasks based on assignment */}
+                                                            {tasks.filter(t => t.projectId === entry.projectId && isTaskAccessible(t)).map(t => (
                                                                 <option key={t.id} value={t.id}>{t.name}</option>
                                                             ))}
+                                                            {/* Keep the selected task visible even if user loses access, to prevent UI glitches */}
+                                                            {entry.taskId && !isTaskAccessible(tasks.find(t=>t.id === entry.taskId)!) && (
+                                                                <option value={entry.taskId}>{tasks.find(t=>t.id === entry.taskId)?.name || 'Unknown'}</option>
+                                                            )}
                                                             <option value="" disabled>Select Activity</option>
                                                         </select>
                                                     </div>

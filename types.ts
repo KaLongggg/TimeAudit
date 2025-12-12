@@ -23,12 +23,14 @@ export interface User {
   email: string;
   role: Role;
   avatar: string;
+  managerId?: string; // New field for hierarchy
 }
 
 export interface Task {
   id: string;
   name: string;
   projectId: string;
+  assignedUserIds?: string[]; // New field: if empty/undefined, open to all. If set, restricted to these users.
 }
 
 export interface Project {
@@ -73,4 +75,6 @@ export interface TimeOffRequest {
   type: 'Annual Leave' | 'Sick Leave' | 'Other';
   reason: string;
   status: TimeOffStatus;
+  attachment?: string; // Base64 data string or URL
+  attachmentName?: string;
 }

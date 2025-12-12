@@ -1,20 +1,23 @@
+
 import React, { useState } from 'react';
-import { Project, Task } from '../types';
-import { Plus, Edit2, Trash2, X, Briefcase, Search, FolderKanban, ListTodo } from 'lucide-react';
+import { Project, Task, User } from '../types';
+import { Plus, Edit2, Trash2, X, Briefcase, Search, FolderKanban, ListTodo, Users, Globe, Check } from 'lucide-react';
 import { PROJECT_COLORS } from '../constants';
 
 interface ProjectManagerProps {
   projects: Project[];
   tasks: Task[];
+  users?: User[]; // New prop for access control
   onAdd: (project: Omit<Project, 'id'>) => void;
   onUpdate: (project: Project) => void;
   onDelete: (id: string) => void;
-  onTaskAction: (action: 'add' | 'delete', taskData: any) => void;
+  onTaskAction: (action: 'add' | 'delete' | 'update', taskData: any) => void;
 }
 
 export const ProjectManager: React.FC<ProjectManagerProps> = ({
   projects,
   tasks,
+  users = [],
   onAdd,
   onUpdate,
   onDelete,
@@ -31,6 +34,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     color: PROJECT_COLORS[0]
   });
   const [newTaskName, setNewTaskName] = useState('');
+  
+  // Task Access Control UI State
+  const [editingTaskAccess, setEditingTaskAccess] = useState<string | null>(null); // Task ID being edited for access
 
   const handleOpenModal = (project?: Project) => {
     if (project) {
@@ -49,12 +55,14 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       });
     }
     setNewTaskName('');
+    setEditingTaskAccess(null);
     setIsModalOpen(true);
   };
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingId(null);
+    setEditingTaskAccess(null);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -73,6 +81,20 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     if (!newTaskName.trim() || !editingId) return;
     onTaskAction('add', { name: newTaskName, projectId: editingId });
     setNewTaskName('');
+  };
+
+  const toggleUserAccess = (taskId: string, userId: string, currentAssigned: string[] = []) => {
+      let newAssigned = [...currentAssigned];
+      if (newAssigned.includes(userId)) {
+          newAssigned = newAssigned.filter(id => id !== userId);
+      } else {
+          newAssigned.push(userId);
+      }
+      
+      const task = tasks.find(t => t.id === taskId);
+      if(task) {
+          onTaskAction('update', { ...task, assignedUserIds: newAssigned });
+      }
   };
 
   const filteredProjects = projects.filter(p => {
@@ -190,7 +212,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
       {/* Modal Form */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
             <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
               <h3 className="font-bold text-gray-800">
                 {editingId ? 'Edit Project & Tasks' : 'New Project'}
@@ -203,61 +225,67 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
               </button>
             </div>
             
-            <div className="overflow-y-auto p-6 space-y-6">
+            <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                {/* Section 1: Project Details */}
                 <form id="projectForm" onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Project Name</label>
-                    <input 
-                    autoFocus
-                    type="text" 
-                    required
-                    value={formData.name}
-                    onChange={e => setFormData({...formData, name: e.target.value})}
-                    className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    placeholder="e.g. Website Redesign"
-                    />
-                </div>
-
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Client Name</label>
-                    <input 
-                    type="text" 
-                    required
-                    value={formData.clientName}
-                    onChange={e => setFormData({...formData, clientName: e.target.value})}
-                    className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    placeholder="e.g. Acme Corp"
-                    />
-                </div>
-
-                <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Project Color</label>
-                    <div className="flex flex-wrap gap-2">
-                    {PROJECT_COLORS.map(color => (
-                        <button
-                        key={color}
-                        type="button"
-                        onClick={() => setFormData({...formData, color})}
-                        className={`w-8 h-8 rounded-full ${color} transition-all ${
-                            formData.color === color 
-                            ? 'ring-2 ring-offset-2 ring-indigo-500 scale-110 shadow-md' 
-                            : 'hover:scale-105 hover:shadow-sm opacity-80 hover:opacity-100'
-                        }`}
-                        aria-label="Select color"
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Project Name</label>
+                        <input 
+                        autoFocus
+                        type="text" 
+                        required
+                        value={formData.name}
+                        onChange={e => setFormData({...formData, name: e.target.value})}
+                        className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        placeholder="e.g. Website Redesign"
                         />
-                    ))}
                     </div>
-                </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Client Name</label>
+                        <input 
+                        type="text" 
+                        required
+                        value={formData.clientName}
+                        onChange={e => setFormData({...formData, clientName: e.target.value})}
+                        className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        placeholder="e.g. Acme Corp"
+                        />
+                    </div>
+                  </div>
+
+                  <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Project Color</label>
+                      <div className="flex flex-wrap gap-2">
+                      {PROJECT_COLORS.map(color => (
+                          <button
+                          key={color}
+                          type="button"
+                          onClick={() => setFormData({...formData, color})}
+                          className={`w-8 h-8 rounded-full ${color} transition-all ${
+                              formData.color === color 
+                              ? 'ring-2 ring-offset-2 ring-indigo-500 scale-110 shadow-md' 
+                              : 'hover:scale-105 hover:shadow-sm opacity-80 hover:opacity-100'
+                          }`}
+                          aria-label="Select color"
+                          />
+                      ))}
+                      </div>
+                  </div>
                 </form>
 
-                {/* Task Management Section (Only visible when editing existing project) */}
+                {/* Section 2: Task Management (Only visible when editing existing project) */}
                 {editingId && (
-                    <div className="pt-4 border-t border-gray-100">
-                        <h4 className="font-semibold text-gray-800 flex items-center gap-2 mb-3">
-                            <ListTodo className="w-4 h-4 text-indigo-600" /> Manage Tasks
-                        </h4>
+                    <div className="pt-6 border-t border-gray-100">
+                        <div className="flex justify-between items-center mb-4">
+                            <h4 className="font-semibold text-gray-800 flex items-center gap-2">
+                                <ListTodo className="w-4 h-4 text-indigo-600" /> Project Tasks
+                            </h4>
+                        </div>
                         
-                        <div className="flex gap-2 mb-3">
+                        {/* Add Task Input */}
+                        <div className="flex gap-2 mb-4">
                             <input 
                                 type="text"
                                 value={newTaskName}
@@ -270,25 +298,84 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                                 onClick={handleAddTask}
                                 className="px-3 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 font-medium text-sm transition-colors"
                             >
-                                <Plus className="w-4 h-4" />
+                                <Plus className="w-4 h-4" /> Add
                             </button>
                         </div>
 
-                        <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                            {tasks.filter(t => t.projectId === editingId).map(task => (
-                                <div key={task.id} className="flex justify-between items-center bg-gray-50 p-2 rounded-md border border-gray-100 group">
-                                    <span className="text-sm text-gray-700">{task.name}</span>
-                                    <button 
-                                        type="button"
-                                        onClick={() => onTaskAction('delete', task)}
-                                        className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
-                                </div>
-                            ))}
+                        {/* Task List */}
+                        <div className="space-y-2">
+                            {tasks.filter(t => t.projectId === editingId).map(task => {
+                                const isEditingAccess = editingTaskAccess === task.id;
+                                const assignedCount = task.assignedUserIds?.length || 0;
+                                const isPublic = assignedCount === 0;
+
+                                return (
+                                    <div key={task.id} className="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
+                                        <div className="flex justify-between items-center p-3">
+                                            <span className="text-sm font-medium text-gray-700">{task.name}</span>
+                                            
+                                            <div className="flex items-center gap-2">
+                                                {/* Access Control Toggle Button */}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setEditingTaskAccess(isEditingAccess ? null : task.id)}
+                                                    className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium border transition-colors ${
+                                                        isPublic 
+                                                        ? 'bg-white text-gray-500 border-gray-200 hover:border-indigo-300' 
+                                                        : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                                    }`}
+                                                    title="Manage Access"
+                                                >
+                                                    {isPublic ? <Globe className="w-3 h-3" /> : <Users className="w-3 h-3" />}
+                                                    {isPublic ? 'Everyone' : `${assignedCount} Assigned`}
+                                                </button>
+
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => onTaskAction('delete', task)}
+                                                    className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Expandable User Selection */}
+                                        {isEditingAccess && (
+                                            <div className="bg-white border-t border-gray-200 p-3 animate-in slide-in-from-top-2">
+                                                <p className="text-xs text-gray-500 mb-2 font-medium uppercase">Who can access this task?</p>
+                                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-40 overflow-y-auto">
+                                                    {users.map(u => {
+                                                        const isAssigned = task.assignedUserIds?.includes(u.id);
+                                                        return (
+                                                            <button
+                                                                key={u.id}
+                                                                type="button"
+                                                                onClick={() => toggleUserAccess(task.id, u.id, task.assignedUserIds)}
+                                                                className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-left transition-all ${
+                                                                    isAssigned 
+                                                                    ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200' 
+                                                                    : 'hover:bg-gray-50 text-gray-600'
+                                                                }`}
+                                                            >
+                                                                <div className={`w-3 h-3 rounded-full border flex items-center justify-center ${isAssigned ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300 bg-white'}`}>
+                                                                    {isAssigned && <Check className="w-2 h-2 text-white" />}
+                                                                </div>
+                                                                <span className="truncate">{u.name}</span>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <p className="text-[10px] text-gray-400 mt-2 italic">
+                                                    * If no users are selected, the task is visible to everyone.
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
                             {tasks.filter(t => t.projectId === editingId).length === 0 && (
-                                <p className="text-xs text-gray-400 italic text-center py-2">No tasks defined for this project.</p>
+                                <p className="text-xs text-gray-400 italic text-center py-4">No tasks defined for this project.</p>
                             )}
                         </div>
                     </div>

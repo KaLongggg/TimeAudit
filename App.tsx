@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { 
   MOCK_USERS // Keep for fallback if needed
@@ -146,6 +147,11 @@ const DashboardContent: React.FC = () => {
     }
   };
 
+  const handleUpdateUser = (updatedUser: User) => {
+      setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+      storageService.saveUser(updatedUser);
+  };
+
   const handleWeekChange = (direction: 'prev' | 'next' | 'current', date?: string) => {
     if (direction === 'current' && date) {
       const [y, m, d] = date.split('-').map(Number);
@@ -228,14 +234,22 @@ const DashboardContent: React.FC = () => {
     }
   };
 
-  const handleTaskAction = (action: 'add' | 'delete', taskData: any) => {
+  const handleTaskAction = (action: 'add' | 'delete' | 'update', taskData: any) => {
     if (action === 'add') {
-      const newTask: Task = { id: `t-${Date.now()}`, name: taskData.name, projectId: taskData.projectId };
+      const newTask: Task = { 
+          id: `t-${Date.now()}`, 
+          name: taskData.name, 
+          projectId: taskData.projectId,
+          assignedUserIds: [] // Default public
+      };
       setTasks(prev => [...prev, newTask]);
       storageService.saveTask(newTask);
     } else if (action === 'delete') {
       setTasks(prev => prev.filter(t => t.id !== taskData.id));
       storageService.deleteTask(taskData.id);
+    } else if (action === 'update') {
+        setTasks(prev => prev.map(t => t.id === taskData.id ? taskData : t));
+        storageService.saveTask(taskData);
     }
   };
 
@@ -380,6 +394,7 @@ const DashboardContent: React.FC = () => {
                         users={allUsers}
                         onApprove={handleApprove}
                         onReject={handleReject}
+                        onUpdateUser={handleUpdateUser}
                     />
                 </div>
             )}
@@ -389,6 +404,7 @@ const DashboardContent: React.FC = () => {
                     <ProjectManager 
                         projects={projects}
                         tasks={tasks}
+                        users={allUsers}
                         onAdd={handleAddProject}
                         onUpdate={handleUpdateProject}
                         onDelete={handleDeleteProject}
