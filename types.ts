@@ -24,6 +24,16 @@ export interface User {
   role: Role;
   avatar: string;
   managerId?: string; // New field for hierarchy
+  // Extended Profile Fields
+  department?: string;
+  workPhone?: string;
+  personalPhone?: string;
+  // Address Fields
+  street?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  country?: string;
 }
 
 export interface Task {

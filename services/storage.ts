@@ -80,7 +80,17 @@ export const storageService = {
             email: u.email,
             role: u.role,
             avatar: u.avatar,
-            managerId: u.manager_id // Map DB column
+            managerId: u.manager_id,
+            // New Fields
+            department: u.department,
+            workPhone: u.work_phone,
+            personalPhone: u.personal_phone,
+            // Address mapping
+            street: u.street,
+            city: u.city,
+            state: u.state,
+            zip: u.zip,
+            country: u.country
         })) as User[];
         
         const timeOffData = (timeOffRes.data || []).map((row: any) => ({
@@ -106,7 +116,7 @@ export const storageService = {
         };
       } catch (error) {
         console.error("Error loading from Supabase:", error);
-        alert("Failed to load from Supabase. Check console for table schema errors or API keys. Falling back to local storage.");
+        // Don't alert here to avoid spamming the user on every load if config is wrong
       }
     }
 
@@ -115,7 +125,7 @@ export const storageService = {
       projects: loadFromLS<Project[]>(LS_KEYS.PROJECTS, MOCK_PROJECTS),
       tasks: loadFromLS<Task[]>(LS_KEYS.TASKS, MOCK_TASKS),
       timesheets: loadFromLS<Timesheet[]>(LS_KEYS.TIMESHEETS, MOCK_TIMESHEETS),
-      users: MOCK_USERS, 
+      users: loadFromLS<User[]>(LS_KEYS.USERS, MOCK_USERS), 
       timeOffRequests: loadFromLS<TimeOffRequest[]>(LS_KEYS.TIMEOFF, [])
     };
   },
@@ -176,16 +186,40 @@ export const storageService = {
 
   // --- USERS ---
   saveUser: async (user: User) => {
+     // Local Storage
+     const users = loadFromLS<User[]>(LS_KEYS.USERS, MOCK_USERS);
+     const updated = users.some(u => u.id === user.id)
+       ? users.map(u => u.id === user.id ? user : u)
+       : [...users, user];
+     saveToLS(LS_KEYS.USERS, updated);
+
      if (storageService.isCloudEnabled()) {
-         await supabase.from('users').upsert({
+         // IMPORTANT: We must explicitly send null if managerId is undefined
+         // Otherwise Supabase/Postgres might ignore the field and keep the old value.
+         const { error } = await supabase.from('users').upsert({
              id: user.id,
              name: user.name,
              email: user.email,
              role: user.role,
              avatar: user.avatar,
-             manager_id: user.managerId
+             manager_id: user.managerId || null,
+             department: user.department || null,
+             work_phone: user.workPhone || null,
+             personal_phone: user.personalPhone || null,
+             // Save separate fields
+             street: user.street || null,
+             city: user.city || null,
+             state: user.state || null,
+             zip: user.zip || null,
+             country: user.country || null
          });
+
+         if (error) {
+             console.error("Error saving user profile:", error);
+             return error;
+         }
      }
+     return null;
   },
 
   // --- TIMESHEETS ---

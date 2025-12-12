@@ -13,6 +13,7 @@ interface TimesheetEditorProps {
   onSubmit: (timesheet: Timesheet) => void;
   onWeekChange: (direction: 'prev' | 'next' | 'current', date?: string) => void;
   onCopyPrevious: () => void;
+  readOnly?: boolean; // New prop for report view
 }
 
 export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
@@ -23,7 +24,8 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
   onSave,
   onSubmit,
   onWeekChange,
-  onCopyPrevious
+  onCopyPrevious,
+  readOnly = false
 }) => {
   const [entries, setEntries] = useState<TimeEntry[]>(timesheet.entries);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -61,10 +63,11 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
   };
 
   const calculateTotal = () => {
-    return entries.reduce((acc, entry) => acc + entry.hours.reduce((a, b) => a + b, 0), 0);
+    return entries.reduce((acc, entry) => acc + entry.hours.reduce((a, b) => a + (b || 0), 0), 0);
   };
 
-  const isTaskAccessible = (task: Task) => {
+  const isTaskAccessible = (task: Task | undefined) => {
+      if (!task) return false;
       if (!task.assignedUserIds || task.assignedUserIds.length === 0) return true;
       return task.assignedUserIds.includes(timesheet.userId);
   };
@@ -249,6 +252,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
   };
 
   const openDatePicker = () => {
+      if (readOnly) return; // Disable picker in read-only mode if desired, or keep it to navigate
       try {
           dateInputRef.current?.showPicker();
       } catch (err) {
@@ -256,7 +260,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
       }
   };
 
-  const isReadOnly = timesheet.status === TimesheetStatus.SUBMITTED || timesheet.status === TimesheetStatus.APPROVED;
+  const isReadOnly = readOnly || timesheet.status === TimesheetStatus.SUBMITTED || timesheet.status === TimesheetStatus.APPROVED;
 
   // Render Helpers
   const getEntriesForDay = (dayIndex: number) => {
@@ -273,10 +277,16 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
       <div className="p-4 border-b border-gray-200 bg-white flex flex-col md:flex-row justify-between items-center gap-4 sticky top-0 z-20 shadow-sm">
          <div className="flex items-center gap-4 w-full md:w-auto">
              <div className="flex items-stretch bg-gray-50 border border-gray-200 rounded-lg p-0.5 relative group flex-1 md:flex-none">
-                <button onClick={() => onWeekChange('prev')} className="p-1.5 hover:bg-white rounded shadow-sm text-gray-600 transition-all z-20 relative flex items-center justify-center"><ChevronLeft className="w-5 h-5"/></button>
+                <button 
+                    onClick={() => onWeekChange('prev')} 
+                    disabled={readOnly && !onWeekChange} // If readOnly is true in a report modal, navigation might be disabled or handled by parent
+                    className="p-1.5 hover:bg-white rounded shadow-sm text-gray-600 transition-all z-20 relative flex items-center justify-center disabled:opacity-50"
+                >
+                    <ChevronLeft className="w-5 h-5"/>
+                </button>
                 
                 <div 
-                    className="relative group flex-1 min-w-[200px] flex items-center justify-center cursor-pointer"
+                    className={`relative group flex-1 min-w-[200px] flex items-center justify-center ${readOnly ? '' : 'cursor-pointer'}`}
                     onClick={openDatePicker}
                 >
                     <input 
@@ -284,10 +294,11 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                         type="date"
                         value={weekStartDate}
                         onChange={handleDatePick}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-30 date-input-full"
+                        disabled={readOnly}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-30 date-input-full disabled:cursor-default"
                     />
-                    <div className="px-4 py-1.5 flex items-center justify-center gap-2 text-sm font-semibold text-gray-700 w-full group-hover:text-indigo-600 transition-colors select-none">
-                        <Calendar className="w-4 h-4 text-indigo-500 mb-0.5" />
+                    <div className={`px-4 py-1.5 flex items-center justify-center gap-2 text-sm font-semibold text-gray-700 w-full ${readOnly ? '' : 'group-hover:text-indigo-600'} transition-colors select-none`}>
+                        <Calendar className={`w-4 h-4 mb-0.5 ${readOnly ? 'text-gray-400' : 'text-indigo-500'}`} />
                         <span>
                             {new Date(weekDates[0]).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} 
                             {' - '} 
@@ -296,7 +307,13 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                     </div>
                 </div>
 
-                <button onClick={() => onWeekChange('next')} className="p-1.5 hover:bg-white rounded shadow-sm text-gray-600 transition-all z-20 relative flex items-center justify-center"><ChevronRight className="w-5 h-5"/></button>
+                <button 
+                    onClick={() => onWeekChange('next')} 
+                    disabled={readOnly && !onWeekChange}
+                    className="p-1.5 hover:bg-white rounded shadow-sm text-gray-600 transition-all z-20 relative flex items-center justify-center disabled:opacity-50"
+                >
+                    <ChevronRight className="w-5 h-5"/>
+                </button>
              </div>
              
              <div className="hidden md:flex bg-gray-100 p-0.5 rounded-lg border border-gray-200">
@@ -373,7 +390,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                         {entries.map((entry) => (
-                            <tr key={entry.id} className="hover:bg-gray-50 group">
+                            <tr key={entry.id} className="hover:bg-indigo-50 transition-colors duration-200 group">
                                 <td className="p-2 border-r border-gray-100 align-top">
                                     <div className="space-y-2">
                                         <select
@@ -397,7 +414,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                             {tasks.filter(t => t.projectId === entry.projectId && isTaskAccessible(t)).map(t => (
                                                 <option key={t.id} value={t.id}>{t.name}</option>
                                             ))}
-                                            {entry.taskId && !isTaskAccessible(tasks.find(t=>t.id === entry.taskId)!) && (
+                                            {entry.taskId && !isTaskAccessible(tasks.find(t=>t.id === entry.taskId)) && (
                                                 <option value={entry.taskId}>{tasks.find(t=>t.id === entry.taskId)?.name || 'Unknown'}</option>
                                             )}
                                         </select>
@@ -439,7 +456,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                     </td>
                                 ))}
                                 <td className="p-2 text-center align-top font-bold text-gray-800">
-                                    {entry.hours.reduce((a,b) => a+b, 0).toFixed(2)}
+                                    {entry.hours.reduce((a,b) => a+(b||0), 0).toFixed(2)}
                                 </td>
                                 <td className="p-2 text-center align-middle">
                                     {!isReadOnly && (
@@ -549,7 +566,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                                 </div>
 
                                                 <span className="text-sm font-bold text-gray-800 w-10 text-right font-mono">
-                                                    {entry.hours[dayIndex].toFixed(2)}
+                                                    {(entry.hours[dayIndex] || 0).toFixed(2)}
                                                 </span>
                                             </div>
 
@@ -573,7 +590,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                                                 {tasks.filter(t => t.projectId === entry.projectId && isTaskAccessible(t)).map(t => (
                                                                     <option key={t.id} value={t.id}>{t.name}</option>
                                                                 ))}
-                                                                {entry.taskId && !isTaskAccessible(tasks.find(t=>t.id === entry.taskId)!) && (
+                                                                {entry.taskId && !isTaskAccessible(tasks.find(t=>t.id === entry.taskId)) && (
                                                                     <option value={entry.taskId}>{tasks.find(t=>t.id === entry.taskId)?.name || 'Unknown'}</option>
                                                                 )}
                                                                 <option value="" disabled>Select Activity</option>

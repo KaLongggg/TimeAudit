@@ -17,6 +17,7 @@ import { TimesheetEditor } from './components/TimesheetEditor';
 import { AdminView } from './components/AdminView';
 import { ProjectManager } from './components/ProjectManager';
 import { TimeOffView } from './components/TimeOffView';
+import { ProfileEditor } from './components/ProfileEditor';
 import { storageService } from './services/storage';
 import { Login } from './components/Login';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -30,7 +31,8 @@ import {
   Wifi,
   WifiOff,
   Loader2,
-  Plane
+  Plane,
+  Users
 } from 'lucide-react';
 
 // Helper to manipulate YYYY-MM-DD strings safely using UTC to avoid timezone issues
@@ -60,7 +62,7 @@ const getSystemCurrentWeekStart = (): string => {
 
 // --- MAIN CONTENT COMPONENT (To separate Auth Logic) ---
 const DashboardContent: React.FC = () => {
-  const { user, signOut } = useAuth();
+  const { user, signOut, updateLocalUser } = useAuth();
   
   // Global State
   const [loading, setLoading] = useState(true);
@@ -76,6 +78,9 @@ const DashboardContent: React.FC = () => {
   const [currentView, setCurrentView] = useState<'timesheet' | 'admin' | 'projects' | 'timeoff'>('timesheet');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
+  // Profile Editor State
+  const [isProfileEditorOpen, setIsProfileEditorOpen] = useState(false);
+
   // Date State for Timesheet View - Initialize with System Time
   const [currentWeekStart, setCurrentWeekStart] = useState(getSystemCurrentWeekStart());
 
@@ -147,9 +152,31 @@ const DashboardContent: React.FC = () => {
     }
   };
 
-  const handleUpdateUser = (updatedUser: User) => {
+  const handleUpdateUser = async (updatedUser: User) => {
+      // Optimistic update
       setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
-      storageService.saveUser(updatedUser);
+      
+      const error = await storageService.saveUser(updatedUser);
+      if (error) {
+          alert(`Failed to save user changes: ${error.message}. Please check your database permissions.`);
+          // Reload data to revert the optimistic update
+          const data = await storageService.loadAllData();
+          setAllUsers(data.users);
+      }
+  };
+  
+  const handleSaveProfile = async (updatedUser: User) => {
+    // 1. Save to DB via storage service
+    const error = await storageService.saveUser(updatedUser);
+    if (error) {
+        throw new Error(error.message);
+    }
+    
+    // 2. Update Auth Context (Current User State for Sidebar)
+    updateLocalUser(updatedUser);
+    
+    // 3. Update Global User List (for Admin/Team views)
+    setAllUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
   };
 
   const handleWeekChange = (direction: 'prev' | 'next' | 'current', date?: string) => {
@@ -270,6 +297,9 @@ const DashboardContent: React.FC = () => {
 
   // Determine Active Timesheet
   const activeTimesheet = timesheets.find(t => t.userId === user.id && t.weekStartDate === currentWeekStart);
+  
+  // Calculate if the user manages anyone
+  const isManager = allUsers.some(u => u.managerId === user.id);
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row">
@@ -297,21 +327,29 @@ const DashboardContent: React.FC = () => {
         </div>
 
         <div className="p-6">
-            <div className="flex items-center gap-3 mb-8 bg-indigo-800/50 p-3 rounded-xl border border-indigo-700">
-                <img src={user.avatar || 'https://ui-avatars.com/api/?background=random'} alt="User" className="w-10 h-10 rounded-full border-2 border-indigo-500" />
+            <div 
+              onClick={() => setIsProfileEditorOpen(true)}
+              className="flex items-center gap-3 mb-8 bg-indigo-800/50 p-3 rounded-xl border border-indigo-700 cursor-pointer hover:bg-indigo-800/80 transition-colors group relative"
+              title="Click to edit profile"
+            >
+                <img src={user.avatar || 'https://ui-avatars.com/api/?background=random'} alt="User" className="w-10 h-10 rounded-full border-2 border-indigo-500 group-hover:border-white transition-colors object-cover bg-gray-100" />
                 <div className="overflow-hidden">
-                    <p className="font-medium text-sm truncate">{user.name}</p>
+                    <p className="font-medium text-sm truncate group-hover:text-indigo-100 transition-colors">{user.name}</p>
                     <p className="text-xs text-indigo-300 capitalize">{user.role.toLowerCase()}</p>
+                </div>
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse"></div>
                 </div>
             </div>
 
             <nav className="space-y-1">
-                {user.role === Role.ADMIN && (
+                {(user.role === Role.ADMIN || isManager) && (
                     <button 
                         onClick={() => { setCurrentView('admin'); setMobileMenuOpen(false); }}
                         className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-colors ${currentView === 'admin' ? 'bg-indigo-700 text-white' : 'text-indigo-300 hover:bg-indigo-800 hover:text-white'}`}
                     >
-                        <LayoutDashboard className="w-5 h-5" /> Admin Dashboard
+                        <Users className="w-5 h-5" /> 
+                        {user.role === Role.ADMIN ? 'Admin Dashboard' : 'Team Dashboard'}
                     </button>
                 )}
                 
@@ -364,7 +402,7 @@ const DashboardContent: React.FC = () => {
         <header className="mb-4 px-4 pt-4 md:px-0 md:pt-0 flex justify-between items-center shrink-0">
             <div>
                 <h1 className="text-2xl font-bold text-gray-900">
-                    {currentView === 'admin' && 'Administration'}
+                    {currentView === 'admin' && (user.role === Role.ADMIN ? 'Administration' : 'Team Management')}
                     {currentView === 'timesheet' && 'My Timesheets'}
                     {currentView === 'projects' && 'Project Management'}
                     {currentView === 'timeoff' && 'Time Off Requests'}
@@ -389,6 +427,7 @@ const DashboardContent: React.FC = () => {
             {currentView === 'admin' && (
                 <div className="h-full overflow-y-auto pr-2">
                     <AdminView 
+                        currentUser={user}
                         timesheets={timesheets}
                         projects={projects}
                         users={allUsers}
@@ -424,6 +463,15 @@ const DashboardContent: React.FC = () => {
             )}
         </div>
       </main>
+
+      {/* Modals */}
+      {isProfileEditorOpen && (
+          <ProfileEditor 
+            user={user}
+            onSave={handleSaveProfile}
+            onClose={() => setIsProfileEditorOpen(false)}
+          />
+      )}
     </div>
   );
 };
