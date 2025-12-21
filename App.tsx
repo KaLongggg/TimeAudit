@@ -11,7 +11,8 @@ import {
   Timesheet, 
   TimesheetStatus,
   TimeEntry,
-  TimeOffRequest
+  TimeOffRequest,
+  TimesheetHistoryItem
 } from './types';
 import { TimesheetEditor } from './components/TimesheetEditor';
 import { AdminView } from './components/AdminView';
@@ -23,13 +24,10 @@ import { Login } from './components/Login';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { 
   Clock, 
-  LayoutDashboard, 
   LogOut, 
   CalendarDays,
   Menu,
   Briefcase,
-  Wifi,
-  WifiOff,
   Loader2,
   Plane,
   Users
@@ -112,7 +110,13 @@ const DashboardContent: React.FC = () => {
                 weekStartDate: currentWeekStart,
                 status: TimesheetStatus.DRAFT,
                 entries: [],
-                totalHours: 0
+                totalHours: 0,
+                history: [{
+                    timestamp: new Date().toISOString(),
+                    action: 'CREATED',
+                    actorName: user.name,
+                    note: 'Auto-created by system'
+                }]
             };
             // Optimistic update
             setTimesheets(prev => [...prev, newSheet]);
@@ -122,13 +126,29 @@ const DashboardContent: React.FC = () => {
     }
   }, [user, timesheets, currentWeekStart, loading]);
 
+  const addHistoryEntry = (sheet: Timesheet, action: TimesheetHistoryItem['action'], actorName: string, note?: string): Timesheet => {
+      const entry: TimesheetHistoryItem = {
+          timestamp: new Date().toISOString(),
+          action,
+          actorName,
+          note
+      };
+      return {
+          ...sheet,
+          history: [...(sheet.history || []), entry]
+      };
+  };
+
   const handleSaveTimesheet = (updated: Timesheet) => {
     setTimesheets(prev => prev.map(t => t.id === updated.id ? updated : t));
     storageService.saveTimesheet(updated);
   };
 
   const handleSubmitTimesheet = (updated: Timesheet) => {
-    const final = { ...updated, status: TimesheetStatus.SUBMITTED };
+    let final = { ...updated, status: TimesheetStatus.SUBMITTED };
+    if (user) {
+        final = addHistoryEntry(final, 'SUBMITTED', user.name, 'Submitted for approval');
+    }
     setTimesheets(prev => prev.map(t => t.id === final.id ? final : t));
     storageService.saveTimesheet(final);
     alert("Timesheet submitted for approval!");
@@ -136,8 +156,10 @@ const DashboardContent: React.FC = () => {
 
   const handleApprove = (id: string) => {
     const sheet = timesheets.find(t => t.id === id);
-    if (sheet) {
-      const updated = { ...sheet, status: TimesheetStatus.APPROVED };
+    if (sheet && user) {
+      let updated = { ...sheet, status: TimesheetStatus.APPROVED };
+      updated = addHistoryEntry(updated, 'APPROVED', user.name);
+      
       setTimesheets(prev => prev.map(t => t.id === id ? updated : t));
       storageService.saveTimesheet(updated);
     }
@@ -145,11 +167,26 @@ const DashboardContent: React.FC = () => {
 
   const handleReject = (id: string) => {
     const sheet = timesheets.find(t => t.id === id);
-    if (sheet) {
-      const updated = { ...sheet, status: TimesheetStatus.REJECTED };
+    if (sheet && user) {
+      let updated = { ...sheet, status: TimesheetStatus.REJECTED };
+      updated = addHistoryEntry(updated, 'REJECTED', user.name);
+
       setTimesheets(prev => prev.map(t => t.id === id ? updated : t));
       storageService.saveTimesheet(updated);
     }
+  };
+
+  const handleReopen = (id: string) => {
+      if(!confirm("Are you sure you want to reopen this timesheet? It will return to DRAFT status.")) return;
+
+      const sheet = timesheets.find(t => t.id === id);
+      if (sheet && user) {
+          let updated = { ...sheet, status: TimesheetStatus.DRAFT };
+          updated = addHistoryEntry(updated, 'REOPENED', user.name, 'Reopened for editing');
+          
+          setTimesheets(prev => prev.map(t => t.id === id ? updated : t));
+          storageService.saveTimesheet(updated);
+      }
   };
 
   const handleUpdateUser = async (updatedUser: User) => {
@@ -298,8 +335,8 @@ const DashboardContent: React.FC = () => {
   // Determine Active Timesheet
   const activeTimesheet = timesheets.find(t => t.userId === user.id && t.weekStartDate === currentWeekStart);
   
-  // Calculate if the user manages anyone
-  const isManager = allUsers.some(u => u.managerId === user.id);
+  // Calculate if the user has dashboard access (Admin OR Manager)
+  const canAccessTeamDashboard = user.role === Role.ADMIN || user.role === Role.MANAGER;
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col md:flex-row">
@@ -343,7 +380,7 @@ const DashboardContent: React.FC = () => {
             </div>
 
             <nav className="space-y-1">
-                {(user.role === Role.ADMIN || isManager) && (
+                {canAccessTeamDashboard && (
                     <button 
                         onClick={() => { setCurrentView('admin'); setMobileMenuOpen(false); }}
                         className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-colors ${currentView === 'admin' ? 'bg-indigo-700 text-white' : 'text-indigo-300 hover:bg-indigo-800 hover:text-white'}`}
@@ -379,19 +416,7 @@ const DashboardContent: React.FC = () => {
         </div>
 
         <div className="absolute bottom-0 left-0 right-0 p-6 bg-indigo-950 border-t border-indigo-900">
-            <div className="mb-4 flex items-center gap-2 justify-center">
-              {storageService.isCloudEnabled() ? (
-                <span className="flex items-center gap-1.5 text-[10px] text-green-300 bg-green-900/30 px-2 py-1 rounded-full border border-green-800">
-                  <Wifi className="w-3 h-3" /> Cloud Synced
-                </span>
-              ) : (
-                <span className="flex items-center gap-1.5 text-[10px] text-orange-300 bg-orange-900/30 px-2 py-1 rounded-full border border-orange-800">
-                  <WifiOff className="w-3 h-3" /> Local Storage
-                </span>
-              )}
-            </div>
-
-            <button onClick={signOut} className="flex items-center gap-2 mt-2 text-xs text-red-300 hover:text-red-200 w-full justify-center bg-indigo-900/50 py-2 rounded">
+            <button onClick={signOut} className="flex items-center gap-2 text-xs text-red-300 hover:text-red-200 w-full justify-center bg-indigo-900/50 py-2 rounded">
                 <LogOut className="w-4 h-4" /> Sign Out
             </button>
         </div>
@@ -434,6 +459,7 @@ const DashboardContent: React.FC = () => {
                         onApprove={handleApprove}
                         onReject={handleReject}
                         onUpdateUser={handleUpdateUser}
+                        onReopen={handleReopen}
                     />
                 </div>
             )}

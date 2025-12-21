@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TimeEntry, Project, Task, Timesheet, TimesheetStatus } from '../types';
 import { WEEK_DAYS } from '../constants';
-import { Plus, Save, Send, Copy, Calendar, ChevronLeft, ChevronRight, Star, MinusCircle, Coffee, AlertTriangle, LayoutGrid, List } from 'lucide-react';
+import { Plus, Save, Send, Copy, Calendar, ChevronLeft, ChevronRight, MinusCircle, Coffee, AlertTriangle, LayoutGrid, List, History, X } from 'lucide-react';
 
 interface TimesheetEditorProps {
   timesheet: Timesheet;
@@ -30,6 +30,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
   const [entries, setEntries] = useState<TimeEntry[]>(timesheet.entries);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'detail'>('grid');
+  const [showHistory, setShowHistory] = useState(false);
   const dateInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -93,7 +94,6 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
       dailyTimes: Array(7).fill({ start: '', end: '' }),
       notes: type === 'break' ? 'Break' : '',
       billingStatus: defaultBilling,
-      starred: false
     };
     
     if (viewMode === 'detail') {
@@ -122,7 +122,6 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
       dailyTimes: Array(7).fill({ start: '', end: '' }),
       notes: '',
       billingStatus: 'Billable',
-      starred: false
     };
     setEntries([...entries, newEntry]);
   };
@@ -231,17 +230,39 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
     return null;
   };
 
+  const validateNotes = (): string | null => {
+    for (const entry of entries) {
+      // Check if entry has any time logged in any day
+      const hasTime = entry.hours.some(h => h > 0);
+      if (hasTime && (!entry.notes || !entry.notes.trim())) {
+         const taskName = tasks.find(t => t.id === entry.taskId)?.name || 'Unknown Task';
+         return `Comments are required for task "${taskName}".`;
+      }
+    }
+    return null;
+  };
+
   const handleSaveLocal = () => {
     onSave({ ...timesheet, entries, totalHours: calculateTotal() });
   };
 
   const handleSubmitLocal = () => {
-    const error = validateOverlaps();
+    // 1. Check overlaps
+    let error = validateOverlaps();
     if (error) {
         setValidationError(error);
         window.scrollTo({ top: 0, behavior: 'smooth' });
         return;
     }
+
+    // 2. Check notes
+    error = validateNotes();
+    if (error) {
+        setValidationError(error);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+    }
+
     onSubmit({ ...timesheet, entries, totalHours: calculateTotal(), status: TimesheetStatus.SUBMITTED });
   };
 
@@ -252,7 +273,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
   };
 
   const openDatePicker = () => {
-      if (readOnly) return; // Disable picker in read-only mode if desired, or keep it to navigate
+      if (readOnly) return; 
       try {
           dateInputRef.current?.showPicker();
       } catch (err) {
@@ -272,14 +293,14 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full">
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col h-full relative">
       {/* Top Bar */}
       <div className="p-4 border-b border-gray-200 bg-white flex flex-col md:flex-row justify-between items-center gap-4 sticky top-0 z-20 shadow-sm">
          <div className="flex items-center gap-4 w-full md:w-auto">
              <div className="flex items-stretch bg-gray-50 border border-gray-200 rounded-lg p-0.5 relative group flex-1 md:flex-none">
                 <button 
                     onClick={() => onWeekChange('prev')} 
-                    disabled={readOnly && !onWeekChange} // If readOnly is true in a report modal, navigation might be disabled or handled by parent
+                    disabled={readOnly && !onWeekChange} 
                     className="p-1.5 hover:bg-white rounded shadow-sm text-gray-600 transition-all z-20 relative flex items-center justify-center disabled:opacity-50"
                 >
                     <ChevronLeft className="w-5 h-5"/>
@@ -331,13 +352,23 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                 </button>
              </div>
 
-             <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase border whitespace-nowrap ${
-                timesheet.status === TimesheetStatus.APPROVED ? 'bg-green-50 text-green-700 border-green-200' : 
-                timesheet.status === TimesheetStatus.SUBMITTED ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                'bg-gray-100 text-gray-600 border-gray-200'
-             }`}>
-                {timesheet.status}
-             </span>
+             <div className="flex items-center gap-2">
+                 <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase border whitespace-nowrap ${
+                    timesheet.status === TimesheetStatus.APPROVED ? 'bg-green-50 text-green-700 border-green-200' : 
+                    timesheet.status === TimesheetStatus.SUBMITTED ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                    timesheet.status === TimesheetStatus.REJECTED ? 'bg-red-50 text-red-700 border-red-200' :
+                    'bg-gray-100 text-gray-600 border-gray-200'
+                 }`}>
+                    {timesheet.status}
+                 </span>
+                 <button 
+                    onClick={() => setShowHistory(true)}
+                    className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                    title="View History"
+                 >
+                    <History className="w-4 h-4" />
+                 </button>
+             </div>
          </div>
 
          <div className="flex gap-2 w-full md:w-auto justify-end">
@@ -502,7 +533,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
         </div>
       )}
 
-      {/* --- DETAIL VIEW (Original Day List) --- */}
+      {/* --- DETAIL VIEW --- */}
       {viewMode === 'detail' && (
         <div className="flex-1 overflow-y-auto bg-gray-100 p-4 space-y-4">
             {weekDates.map((date, dayIndex) => {
@@ -534,10 +565,8 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                     <div key={entry.id + dayIndex} className="p-3 md:p-4 hover:bg-gray-50 transition-colors group">
                                         <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
                                             
-                                            {/* Styled Time Component - Clean Capsule Look */}
                                             <div className="flex items-center gap-3 min-w-[240px]">
                                                 <div className="flex items-center bg-gray-900 border border-gray-700 rounded-md shadow-sm overflow-hidden w-48">
-                                                    {/* Start Time */}
                                                     <div className="px-2 py-1.5 bg-gray-800 border-r border-gray-700 flex-1 relative">
                                                         <input 
                                                             disabled={isReadOnly}
@@ -548,11 +577,7 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                                             style={{ colorScheme: 'dark' }}
                                                         />
                                                     </div>
-
-                                                    {/* Separator */}
                                                     <div className="bg-gray-900 px-2 text-gray-500 text-xs font-bold">-</div>
-
-                                                    {/* End Time */}
                                                     <div className="px-2 py-1.5 bg-gray-800 border-l border-gray-700 flex-1 relative">
                                                         <input 
                                                             disabled={isReadOnly}
@@ -564,13 +589,11 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                                         />
                                                     </div>
                                                 </div>
-
                                                 <span className="text-sm font-bold text-gray-800 w-10 text-right font-mono">
                                                     {(entry.hours[dayIndex] || 0).toFixed(2)}
                                                 </span>
                                             </div>
 
-                                            {/* Task & Project Details OR Break Label */}
                                             <div className="flex-1 w-full">
                                                 {isBreak ? (
                                                     <div className="flex items-center gap-2 py-1.5 px-3 bg-orange-50 text-orange-800 rounded-md border border-orange-200 w-fit shadow-sm">
@@ -579,7 +602,6 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                                     </div>
                                                 ) : (
                                                     <div className="grid grid-cols-1 md:grid-cols-12 gap-3 w-full">
-                                                        {/* Task Selector */}
                                                         <div className="md:col-span-3">
                                                             <select 
                                                                 disabled={isReadOnly}
@@ -597,7 +619,6 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                                             </select>
                                                         </div>
 
-                                                        {/* Project Selector */}
                                                         <div className="md:col-span-4">
                                                             <div className="flex flex-col">
                                                                 <select
@@ -616,7 +637,6 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                                             </div>
                                                         </div>
 
-                                                        {/* Billing Status */}
                                                         <div className="md:col-span-2">
                                                             <select 
                                                                 disabled={isReadOnly}
@@ -629,7 +649,6 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                                             </select>
                                                         </div>
 
-                                                        {/* Notes */}
                                                         <div className="md:col-span-3">
                                                             <input 
                                                                 disabled={isReadOnly}
@@ -644,18 +663,8 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                                                 )}
                                             </div>
 
-                                            {/* Action Buttons */}
                                             {!isReadOnly && (
                                                 <div className="flex items-center gap-2 pt-1 md:pt-0">
-                                                    {!isBreak && (
-                                                        <button 
-                                                            onClick={() => updateEntry(entry.id, 'starred', !entry.starred)}
-                                                            className={`${entry.starred ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'}`}
-                                                            title={entry.starred ? "Unstar" : "Star this entry"}
-                                                        >
-                                                            <Star className={`w-4 h-4 ${entry.starred ? 'fill-yellow-500' : ''}`} />
-                                                        </button>
-                                                    )}
                                                     <button 
                                                         onClick={() => handleDeleteEntryDay(entry.id, dayIndex)}
                                                         className="text-gray-400 hover:text-red-500"
@@ -671,7 +680,6 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                             })}
                         </div>
 
-                        {/* Footer Actions */}
                         {!isReadOnly && (
                             <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex gap-4">
                                 <button 
@@ -692,6 +700,57 @@ export const TimesheetEditor: React.FC<TimesheetEditorProps> = ({
                 );
             })}
         </div>
+      )}
+
+      {/* --- HISTORY MODAL --- */}
+      {showHistory && (
+          <div className="absolute inset-0 z-50 bg-white/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+              <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-full max-w-lg overflow-hidden">
+                  <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                      <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                          <History className="w-5 h-5 text-indigo-600" /> Audit Trail / History
+                      </h3>
+                      <button onClick={() => setShowHistory(false)} className="text-gray-400 hover:text-gray-600">
+                          <X className="w-5 h-5" />
+                      </button>
+                  </div>
+                  <div className="max-h-[60vh] overflow-y-auto p-4 space-y-4">
+                      {timesheet.history && timesheet.history.length > 0 ? (
+                          timesheet.history.slice().reverse().map((item, index) => (
+                              <div key={index} className="flex gap-3 relative pb-4 last:pb-0">
+                                  {index !== (timesheet.history?.length || 0) - 1 && (
+                                      <div className="absolute left-[11px] top-6 bottom-0 w-0.5 bg-gray-100"></div>
+                                  )}
+                                  <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold border-2 ${
+                                      item.action === 'APPROVED' ? 'bg-green-50 text-green-600 border-green-200' :
+                                      item.action === 'REJECTED' ? 'bg-red-50 text-red-600 border-red-200' :
+                                      item.action === 'SUBMITTED' ? 'bg-blue-50 text-blue-600 border-blue-200' :
+                                      'bg-gray-50 text-gray-600 border-gray-200'
+                                  }`}>
+                                      {item.action[0]}
+                                  </div>
+                                  <div className="flex-1">
+                                      <div className="flex justify-between items-start">
+                                          <p className="text-sm font-semibold text-gray-800">{item.action}</p>
+                                          <p className="text-xs text-gray-400 whitespace-nowrap">{new Date(item.timestamp).toLocaleString()}</p>
+                                      </div>
+                                      <p className="text-xs text-gray-500">by {item.actorName}</p>
+                                      {item.note && (
+                                          <div className="mt-1 p-2 bg-gray-50 rounded text-xs text-gray-600 italic border-l-2 border-gray-300">
+                                              "{item.note}"
+                                          </div>
+                                      )}
+                                  </div>
+                              </div>
+                          ))
+                      ) : (
+                          <div className="text-center py-8 text-gray-400 text-sm">
+                              No history recorded for this timesheet.
+                          </div>
+                      )}
+                  </div>
+              </div>
+          </div>
       )}
     </div>
   );

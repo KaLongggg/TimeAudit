@@ -10,10 +10,8 @@ interface ProfileEditorProps {
   onClose: () => void;
 }
 
-// Helper to parse phone number into code and local number
 const parsePhoneNumber = (phone: string | undefined) => {
   if (!phone) return { code: '+61', number: '' };
-  // Sort by length desc to ensure we match specific codes (e.g. +1 vs +123)
   const sortedCodes = [...COUNTRY_CODES].sort((a, b) => b.code.length - a.code.length);
   const match = sortedCodes.find(c => phone.startsWith(c.code));
   if (match) {
@@ -27,7 +25,6 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({ user, onSave, onCl
   const [avatar, setAvatar] = useState(user.avatar);
   const [department, setDepartment] = useState(user.department || '');
   
-  // Phone State
   const initialWork = parsePhoneNumber(user.workPhone);
   const initialPersonal = parsePhoneNumber(user.personalPhone);
   
@@ -37,7 +34,6 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({ user, onSave, onCl
   const [personalPhoneCode, setPersonalPhoneCode] = useState(initialPersonal.code);
   const [personalPhoneNumber, setPersonalPhoneNumber] = useState(initialPersonal.number);
 
-  // Address State (Direct map to user fields)
   const [street, setStreet] = useState(user.street || '');
   const [city, setCity] = useState(user.city || '');
   const [state, setState] = useState(user.state || '');
@@ -62,7 +58,6 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({ user, onSave, onCl
     e.preventDefault();
     setLoading(true);
     
-    // Combine phone numbers
     const finalWorkPhone = workPhoneNumber ? `${workPhoneCode} ${workPhoneNumber}` : '';
     const finalPersonalPhone = personalPhoneNumber ? `${personalPhoneCode} ${personalPhoneNumber}` : '';
 
@@ -132,7 +127,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({ user, onSave, onCl
                     type="text" 
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full pl-9 p-2 text-sm border border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-white bg-gray-800"
+                    className="w-full pl-9 p-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900 bg-white"
                     required
                   />
                 </div>

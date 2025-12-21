@@ -1,6 +1,7 @@
 
 export enum Role {
   ADMIN = 'ADMIN',
+  MANAGER = 'MANAGER',
   EMPLOYEE = 'EMPLOYEE'
 }
 
@@ -17,15 +18,29 @@ export enum TimeOffStatus {
   REJECTED = 'REJECTED'
 }
 
+export interface Department {
+  id: string;
+  name: string;
+  managerId?: string;
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  departmentId: string;
+  managerId?: string;
+}
+
 export interface User {
   id: string;
   name: string;
   email: string;
   role: Role;
   avatar: string;
-  managerId?: string; // New field for hierarchy
+  managerId?: string; // Direct Manager (Hierarchy)
+  teamIds?: string[]; // Assigned Teams
   // Extended Profile Fields
-  department?: string;
+  department?: string; // Legacy string, kept for compatibility, prefer using Department entities
   workPhone?: string;
   personalPhone?: string;
   // Address Fields
@@ -63,7 +78,13 @@ export interface TimeEntry {
   dailyTimes: DayTime[]; // Array of 7 {start, end} objects
   notes: string; 
   billingStatus: 'Billable' | 'Non Billable';
-  starred?: boolean;
+}
+
+export interface TimesheetHistoryItem {
+  timestamp: string; // ISO String
+  action: 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'REOPENED' | 'CREATED';
+  actorName: string;
+  note?: string;
 }
 
 export interface Timesheet {
@@ -73,6 +94,7 @@ export interface Timesheet {
   status: TimesheetStatus;
   entries: TimeEntry[];
   totalHours: number;
+  history?: TimesheetHistoryItem[]; // Audit trail
 }
 
 export interface TimeOffRequest {
