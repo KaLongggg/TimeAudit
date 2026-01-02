@@ -6,7 +6,8 @@ import { ChevronLeft, ChevronRight, Plus, Calendar, X, Clock, AlertCircle, Uploa
 interface TimeOffViewProps {
   userId: string;
   requests: TimeOffRequest[];
-  onCreate: (request: TimeOffRequest) => void;
+  // Fix: The parent App.tsx handleCreateTimeOff expects Omit<TimeOffRequest, 'companyId'>
+  onCreate: (request: Omit<TimeOffRequest, 'companyId'>) => void;
 }
 
 export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCreate }) => {
@@ -52,14 +53,19 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
     setCurrentDate(new Date(year, month + offset, 1));
   };
 
+  // Filter requests to strictly show only the user's own data for this view
+  const myRequests = useMemo(() => {
+    return requests.filter(r => r.userId === userId);
+  }, [requests, userId]);
+
   // --- Layout & Slotting Logic ---
   const checkOverlap = (a: TimeOffRequest, b: TimeOffRequest) => {
     return a.startDate <= b.endDate && a.endDate >= b.startDate;
   };
 
   const layoutMap = useMemo(() => {
-    // 1. Sort by start date, then duration (longer first for better packing)
-    const sorted = [...requests].sort((a, b) => {
+    // ONLY slot the user's own requests to ensure privacy
+    const sorted = [...myRequests].sort((a, b) => {
         if (a.startDate !== b.startDate) return a.startDate.localeCompare(b.startDate);
         const durA = new Date(a.endDate).getTime() - new Date(a.startDate).getTime();
         const durB = new Date(b.endDate).getTime() - new Date(b.startDate).getTime();
@@ -72,7 +78,6 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
     sorted.forEach(req => {
         let slot = 0;
         while (true) {
-            // Check if this slot is taken by an overlapping request
             const isTaken = occupied.some(occ => occ.slot === slot && checkOverlap(occ.req, req));
             if (!isTaken) break;
             slot++;
@@ -82,7 +87,7 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
     });
 
     return slots;
-  }, [requests]);
+  }, [myRequests]);
 
 
   // --- File Handling ---
@@ -135,7 +140,8 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
         }
     }
 
-    const newRequest: TimeOffRequest = {
+    // Fix: Using Omit<TimeOffRequest, 'companyId'> because companyId is added in App.tsx
+    const newRequest: Omit<TimeOffRequest, 'companyId'> = {
       id: crypto.randomUUID ? crypto.randomUUID() : `tr-${Date.now()}`,
       userId,
       startDate: formData.startDate,
@@ -157,11 +163,7 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
 
   const getRequestsForDate = (day: number) => {
     const currentStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return requests.filter(r => 
-        r.userId === userId && 
-        currentStr >= r.startDate && 
-        currentStr <= r.endDate
-    );
+    return myRequests.filter(r => currentStr >= r.startDate && currentStr <= r.endDate);
   };
 
   // --- Styling Helpers ---
@@ -176,10 +178,10 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
     let baseClasses = "h-6 mb-1 text-[10px] flex items-center px-2 cursor-pointer transition-all relative z-10 hover:brightness-95 overflow-hidden whitespace-nowrap ";
     
     if (isStart) baseClasses += "rounded-l-md ml-1 ";
-    else baseClasses += "ml-[-1px] border-l-0 "; // Connect to previous
+    else baseClasses += "ml-[-1px] border-l-0 "; 
     
     if (isEnd) baseClasses += "rounded-r-md mr-1 ";
-    else baseClasses += "mr-[-1px] border-r-0 "; // Connect to next
+    else baseClasses += "mr-[-1px] border-r-0 "; 
 
     if (isRejected) return baseClasses + "bg-gray-200 text-gray-500 line-through";
     if (isSick) return baseClasses + "bg-red-100 text-red-800 border border-red-200";
@@ -241,7 +243,6 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
                 // Build Slots for Rendering
                 const daySlots: (TimeOffRequest | null)[] = [];
                 if (reqs.length > 0) {
-                    // Find max slot index for this day
                     const maxSlot = Math.max(...reqs.map(r => layoutMap.get(r.id) ?? 0));
                     for (let i = 0; i <= maxSlot; i++) {
                         daySlots[i] = reqs.find(r => layoutMap.get(r.id) === i) || null;
@@ -267,7 +268,6 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
                                 <div className="flex flex-col mt-1 relative">
                                     {daySlots.map((req, slotIdx) => {
                                         if (!req) {
-                                            // Render placeholder for empty slot to maintain alignment
                                             return <div key={`empty-${slotIdx}`} className="h-6 mb-1"></div>;
                                         }
 
@@ -398,7 +398,6 @@ export const TimeOffView: React.FC<TimeOffViewProps> = ({ userId, requests, onCr
                           />
                       </div>
 
-                      {/* Attachment Drag & Drop Zone */}
                       <div>
                         <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Attachment (Medical Cert / Evidence)</label>
                         <div 

@@ -1,4 +1,5 @@
 
+// Update MOCK_USERS to match the User interface in types.ts (remove role property)
 import { Project, Role, Task, Timesheet, User } from "./types";
 
 export const MOCK_USERS: User[] = [
@@ -6,7 +7,6 @@ export const MOCK_USERS: User[] = [
     id: 'u1',
     name: 'Alice Johnson',
     email: 'alice@company.com',
-    role: Role.EMPLOYEE,
     avatar: 'https://picsum.photos/seed/alice/200/200',
     department: 'Engineering',
     workPhone: '+1 5550101',
@@ -20,7 +20,6 @@ export const MOCK_USERS: User[] = [
     id: 'u2',
     name: 'Bob Smith',
     email: 'bob@company.com',
-    role: Role.ADMIN,
     avatar: 'https://picsum.photos/seed/bob/200/200',
     department: 'Management',
     workPhone: '+1 5550102'
@@ -29,7 +28,6 @@ export const MOCK_USERS: User[] = [
     id: 'u3',
     name: 'Charlie Davis',
     email: 'charlie@company.com',
-    role: Role.EMPLOYEE,
     avatar: 'https://picsum.photos/seed/charlie/200/200',
     department: 'Design',
     personalPhone: '+61 45559999'

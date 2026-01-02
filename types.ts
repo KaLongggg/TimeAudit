@@ -18,44 +18,59 @@ export enum TimeOffStatus {
   REJECTED = 'REJECTED'
 }
 
+export interface Company {
+  id: string;
+  name: string;
+  logo_url?: string;
+}
+
+export interface UserCompanyRole {
+  company_id: string;
+  role: Role;
+}
+
 export interface Department {
   id: string;
   name: string;
-  managerId?: string;
+  managerIds?: string[];
+  companyId: string;
 }
 
 export interface Team {
   id: string;
   name: string;
   departmentId: string;
-  managerId?: string;
+  managerIds?: string[];
+  companyId: string;
 }
 
 export interface User {
   id: string;
   name: string;
   email: string;
-  role: Role;
   avatar: string;
-  managerId?: string; // Direct Manager (Hierarchy)
-  teamIds?: string[]; // Assigned Teams
-  // Extended Profile Fields
-  department?: string; // Legacy string, kept for compatibility, prefer using Department entities
+  managerId?: string; 
+  teamIds?: string[]; // Multiple teams supported
+  departmentId?: string; // Linked to Department ID
+  department?: string; // Display name (Legacy support)
   workPhone?: string;
   personalPhone?: string;
-  // Address Fields
   street?: string;
   city?: string;
   state?: string;
   zip?: string;
   country?: string;
+  companies?: UserCompanyRole[]; // Linked companies and roles
 }
 
 export interface Task {
   id: string;
   name: string;
   projectId: string;
-  assignedUserIds?: string[]; // New field: if empty/undefined, open to all. If set, restricted to these users.
+  companyId: string;
+  assignedUserIds?: string[];
+  assignedDepartmentIds?: string[];
+  assignedTeamIds?: string[];
 }
 
 export interface Project {
@@ -63,6 +78,7 @@ export interface Project {
   name: string;
   clientName: string;
   color: string;
+  companyId: string;
 }
 
 export interface DayTime {
@@ -74,14 +90,14 @@ export interface TimeEntry {
   id: string;
   taskId: string;
   projectId: string;
-  hours: number[]; // Derived from dailyTimes for backward compatibility and calculations
-  dailyTimes: DayTime[]; // Array of 7 {start, end} objects
+  hours: number[]; 
+  dailyTimes: DayTime[];
   notes: string; 
   billingStatus: 'Billable' | 'Non Billable';
 }
 
 export interface TimesheetHistoryItem {
-  timestamp: string; // ISO String
+  timestamp: string; 
   action: 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'REOPENED' | 'CREATED';
   actorName: string;
   note?: string;
@@ -90,23 +106,25 @@ export interface TimesheetHistoryItem {
 export interface Timesheet {
   id: string;
   userId: string;
-  weekStartDate: string; // ISO Date YYYY-MM-DD
+  companyId: string;
+  weekStartDate: string; 
   status: TimesheetStatus;
   entries: TimeEntry[];
   totalHours: number;
-  history?: TimesheetHistoryItem[]; // Audit trail
+  history?: TimesheetHistoryItem[];
 }
 
 export interface TimeOffRequest {
   id: string;
   userId: string;
-  startDate: string; // YYYY-MM-DD
-  endDate: string;   // YYYY-MM-DD
-  startTime?: string; // HH:MM
-  endTime?: string;   // HH:MM
+  companyId: string;
+  startDate: string;
+  endDate: string;  
+  startTime?: string;
+  endTime?: string;  
   type: 'Annual Leave' | 'Sick Leave' | 'Other';
   reason: string;
   status: TimeOffStatus;
-  attachment?: string; // Base64 data string or URL
+  attachment?: string;
   attachmentName?: string;
 }

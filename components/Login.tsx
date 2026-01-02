@@ -1,12 +1,14 @@
+
 import React, { useState } from 'react';
 import { supabase } from '../services/supabaseClient';
-import { Loader2, Lock, Mail, User as UserIcon, AlertCircle, ArrowRight } from 'lucide-react';
+import { Loader2, Lock, Mail, User as UserIcon, AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { Role } from '../types';
 
 export const Login: React.FC = () => {
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -16,11 +18,11 @@ export const Login: React.FC = () => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setSuccessMsg(null);
 
     try {
       if (isSignUp) {
         // 1. Sign Up in Supabase Auth
-        // We attach the name to user_metadata so it's available even if the immediate public table insert fails
         const { data: authData, error: authError } = await supabase.auth.signUp({
           email,
           password,
@@ -34,10 +36,9 @@ export const Login: React.FC = () => {
 
         if (authError) throw authError;
 
-        // 2. Attempt to create Profile in public 'users' table
-        // IMPORTANT: This only works if Email Confirmation is DISABLED or if Supabase returns a session immediately.
-        // If Email Confirmation is ENABLED, authData.session will be null, and RLS will block this insert.
-        // We handle that case in AuthContext.tsx via "Lazy Creation".
+        // 2. Profile creation logic
+        // If email confirmation is disabled, session is present immediately.
+        // If enabled, session is null and we rely on 'Lazy Creation' in AuthContext after user confirms and logs in.
         if (authData.user && authData.session) {
           const { error: profileError } = await supabase.from('users').insert({
             id: authData.user.id,
@@ -46,21 +47,38 @@ export const Login: React.FC = () => {
             role: Role.EMPLOYEE,
             avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=6366f1&color=fff`
           });
-
+          
           if (profileError) {
-             console.warn("Client-side profile creation failed (likely RLS). Will retry on login.", profileError);
+             console.warn("Profile creation failed (RLS usually prevents this until confirmed), will retry on first login.", profileError);
           }
         }
         
-        alert("Account created! If you enabled email confirmation, please check your inbox.");
-        setIsSignUp(false); // Switch to login view
+        // Custom success message instead of a simple alert
+        const isConfirmationRequired = authData.user && !authData.session;
+        if (isConfirmationRequired) {
+            setSuccessMsg(`Verification email sent to ${email}. Please check your inbox (and spam folder). You must confirm your email before signing in.`);
+        } else {
+            setSuccessMsg("Account created successfully! You can now sign in.");
+        }
+        
+        // Reset form but stay on view to show success
+        setEmail('');
+        setPassword('');
+        setName('');
       } else {
         // Sign In
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
-        if (signInError) throw signInError;
+        
+        if (signInError) {
+            // Provide specific guidance if the email isn't confirmed
+            if (signInError.message.toLowerCase().includes("email not confirmed")) {
+                throw new Error("Your email address has not been confirmed yet. Please check your inbox for the verification link.");
+            }
+            throw signInError;
+        }
       }
     } catch (err: any) {
       setError(err.message || "An error occurred during authentication.");
@@ -86,73 +104,91 @@ export const Login: React.FC = () => {
           </div>
 
           {error && (
-            <div className="mb-6 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700 text-sm">
+            <div className="mb-6 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700 text-sm animate-in fade-in slide-in-from-top-1">
               <AlertCircle className="w-4 h-4 shrink-0" />
               {error}
             </div>
           )}
 
-          <form onSubmit={handleAuth} className="space-y-4">
-            {isSignUp && (
+          {successMsg && (
+            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg text-green-800 text-sm animate-in fade-in zoom-in-95">
+              <div className="flex items-center gap-2 font-bold mb-1">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Action Required</span>
+              </div>
+              <p>{successMsg}</p>
+              <button 
+                onClick={() => { setSuccessMsg(null); setIsSignUp(false); }}
+                className="mt-3 text-indigo-600 font-bold hover:underline"
+              >
+                Go to Sign In
+              </button>
+            </div>
+          )}
+
+          {!successMsg && (
+            <form onSubmit={handleAuth} className="space-y-4">
+              {isSignUp && (
+                <div className="relative">
+                  <UserIcon className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Full Name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required={isSignUp}
+                    className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-gray-900"
+                  />
+                </div>
+              )}
+
               <div className="relative">
-                <UserIcon className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
+                <Mail className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
                 <input
-                  type="text"
-                  placeholder="Full Name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required={isSignUp}
+                  type="email"
+                  placeholder="Email Address"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
                   className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-gray-900"
                 />
               </div>
-            )}
 
-            <div className="relative">
-              <Mail className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
-              <input
-                type="email"
-                placeholder="Email Address"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-gray-900"
-              />
-            </div>
+              <div className="relative">
+                <Lock className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
+                <input
+                  type="password"
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-gray-900"
+                />
+              </div>
 
-            <div className="relative">
-              <Lock className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
-              <input
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
-                className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-gray-900"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg shadow-md shadow-indigo-100 transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed mt-2"
-            >
-              {loading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <>
-                  {isSignUp ? "Sign Up" : "Sign In"} <ArrowRight className="w-4 h-4" />
-                </>
-              )}
-            </button>
-          </form>
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg shadow-md shadow-indigo-100 transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed mt-2"
+              >
+                {loading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <>
+                    {isSignUp ? "Sign Up" : "Sign In"} <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+            </form>
+          )}
         </div>
 
         <div className="bg-gray-50 px-8 py-4 border-t border-gray-100 text-center">
           <p className="text-sm text-gray-600">
             {isSignUp ? "Already have an account?" : "Don't have an account?"}
             <button
-              onClick={() => { setIsSignUp(!isSignUp); setError(null); }}
+              onClick={() => { setIsSignUp(!isSignUp); setError(null); setSuccessMsg(null); }}
               className="ml-2 font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
             >
               {isSignUp ? "Sign In" : "Sign Up"}
